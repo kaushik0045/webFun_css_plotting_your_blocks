@@ -64,4 +64,27 @@ document.addEventListener('DOMContentLoaded', function () {
     el.classList.remove('success', 'error');
     el.classList.add(kind, 'is-visible');
   }
+
+  function blurIn(id) {
+    var target = document.getElementById(id);
+    if (!target) { return; }
+    target.classList.remove('blur-in-target');
+    void target.offsetWidth; // restart animation if triggered again
+    target.classList.add('blur-in-target');
+  }
+
+  document.querySelectorAll('a[href^="#"]').forEach(function (a) {
+    var id = a.getAttribute('href').slice(1);
+    if (!id || !document.getElementById(id)) { return; }
+    a.addEventListener('click', function (event) {
+      event.preventDefault();
+      history.pushState(null, '', '#' + id);
+      document.getElementById(id).scrollIntoView({ behavior: 'auto', block: 'start' });
+      blurIn(id);
+    });
+  });
+
+  if (window.location.hash) {
+    blurIn(window.location.hash.slice(1));
+  }
 });

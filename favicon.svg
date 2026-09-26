@@ -1,4 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Pacific Tax and Insurance logo">
-  <path d="M32 2 L58 12 V30 C58 46 47 57 32 62 C17 57 6 46 6 30 V12 Z" fill="#14284b" stroke="#b8892e" stroke-width="2.5"/>
-  <text x="32" y="40" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="22" font-weight="700" fill="#f3f1ea">PTI</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Pacific Tax and Insurance logo">
+  <circle cx="100" cy="100" r="96" fill="#14284b" stroke="#b8892e" stroke-width="4"/>
+  <g fill="#dbc794">
+    <circle cx="184.0" cy="100.0" r="2"/><circle cx="182.16" cy="119.58" r="2"/><circle cx="179.29" cy="138.18" r="2"/><circle cx="167.96" cy="149.37" r="2"/><circle cx="156.21" cy="162.42" r="2"/><circle cx="142.0" cy="172.75" r="2"/><circle cx="125.96" cy="179.89" r="2"/><circle cx="108.78" cy="183.54" r="2"/><circle cx="91.22" cy="183.54" r="2"/><circle cx="74.04" cy="179.89" r="2"/><circle cx="58.0" cy="172.75" r="2"/><circle cx="43.79" cy="162.42" r="2"/><circle cx="32.04" cy="149.37" r="2"/><circle cx="23.26" cy="134.17" r="2"/><circle cx="17.84" cy="117.46" r="2"/><circle cx="16.0" cy="100.0" r="2"/><circle cx="17.84" cy="82.54" r="2"/><circle cx="23.26" cy="65.83" r="2"/><circle cx="32.04" cy="50.63" r="2"/><circle cx="43.79" cy="37.58" r="2"/><circle cx="58.0" cy="27.25" r="2"/><circle cx="74.04" cy="20.11" r="2"/><circle cx="91.22" cy="16.46" r="2"/><circle cx="108.78" cy="16.46" r="2"/><circle cx="125.96" cy="20.11" r="2"/><circle cx="142.0" cy="27.25" r="2"/><circle cx="156.21" cy="37.58" r="2"/><circle cx="167.96" cy="50.63" r="2"/><circle cx="176.74" cy="65.83" r="2"/><circle cx="182.16" cy="82.54" r="2"/>
+  </g>
+  <circle cx="100" cy="100" r="72" fill="none" stroke="#b8892e" stroke-width="1.5" opacity="0.7"/>
+  <path d="M 100.0,42.0 L 108.04,80.6 L 141.01,58.99 L 119.4,91.96 L 158.0,100.0 L 119.4,108.04 L 141.01,141.01 L 108.04,119.4 L 100.0,158.0 L 91.96,119.4 L 58.99,141.01 L 80.6,108.04 L 42.0,100.0 L 80.6,91.96 L 58.99,58.99 L 91.96,80.6 Z" fill="#b8892e"/>
+  <circle cx="100" cy="100" r="31" fill="#14284b" stroke="#dbc794" stroke-width="2"/>
+  <text x="100" y="110" text-anchor="middle" font-family="Georgia, serif" font-size="31" font-weight="700" fill="#f3f1ea" letter-spacing="0.5">PTI</text>
 </svg>
