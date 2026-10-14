@@ -49,10 +49,10 @@ html { scroll-padding-top: 88px; }
   navigation: auto;
 }
 ::view-transition-old(root) {
-  animation: pageBlurOut 0.5s ease-in forwards;
+  animation: pageBlurOut 0.9s ease-in forwards;
 }
 ::view-transition-new(root) {
-  animation: pageBlurIn 1.1s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: pageBlurIn 1.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 @keyframes pageBlurOut {
   from { opacity: 1; filter: blur(0); }
@@ -654,8 +654,8 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
 .prose ul li { padding: 0.15rem 0; }
 
 .page[hidden] { display: none !important; }
-.page-fade-out { animation: pageFadeOut 0.5s ease-in forwards; }
-.page-fade-in { animation: pageFadeIn 1.1s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+.page-fade-out { animation: pageFadeOut 0.9s ease-in forwards; }
+.page-fade-in { animation: pageFadeIn 1.8s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
 @keyframes pageFadeOut {
   from { opacity: 1; filter: blur(0); }
   to { opacity: 0; filter: blur(16px); }
