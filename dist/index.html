@@ -63,6 +63,26 @@ html { scroll-padding-top: 88px; }
   to { opacity: 1; filter: blur(0); }
 }
 
+/* Scroll-triggered reveal: elements fade/slide in once as they enter the viewport */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.8s ease, transform 0.8s ease;
+}
+.reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+.reveal-group > .reveal:nth-child(1) { transition-delay: 0s; }
+.reveal-group > .reveal:nth-child(2) { transition-delay: 0.08s; }
+.reveal-group > .reveal:nth-child(3) { transition-delay: 0.16s; }
+.reveal-group > .reveal:nth-child(4) { transition-delay: 0.24s; }
+.reveal-group > .reveal:nth-child(5) { transition-delay: 0.32s; }
+.reveal-group > .reveal:nth-child(6) { transition-delay: 0.4s; }
+.reveal-group > .reveal:nth-child(7) { transition-delay: 0.48s; }
+.reveal-group > .reveal:nth-child(8) { transition-delay: 0.56s; }
+.reveal-group > .reveal:nth-child(9) { transition-delay: 0.64s; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 }
@@ -319,15 +339,65 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
 
 /* Hero */
 .hero {
+  position: relative;
+  overflow: hidden;
   padding: clamp(2.5rem, 6vw, 4.5rem) 0;
   background: var(--navy);
   color: var(--white);
 }
 .hero-grid {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: 1.1fr 0.9fr;
   gap: 2.5rem;
   align-items: center;
+}
+
+/* Slow-drifting soft background shapes behind the hero text */
+.hero-aurora {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.hero-aurora span {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(60px);
+  opacity: 0.22;
+  will-change: transform;
+}
+.hero-aurora span:nth-child(1) {
+  width: 420px; height: 420px;
+  top: -140px; left: -100px;
+  background: var(--gold);
+  animation: auroraDrift1 26s ease-in-out infinite;
+}
+.hero-aurora span:nth-child(2) {
+  width: 360px; height: 360px;
+  bottom: -160px; right: -90px;
+  background: var(--navy-lighter);
+  animation: auroraDrift2 32s ease-in-out infinite;
+}
+.hero-aurora span:nth-child(3) {
+  width: 260px; height: 260px;
+  top: 30%; left: 55%;
+  background: var(--gold-light);
+  animation: auroraDrift3 22s ease-in-out infinite;
+}
+@keyframes auroraDrift1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(50px, 35px) scale(1.15); }
+}
+@keyframes auroraDrift2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(-40px, -45px) scale(1.1); }
+}
+@keyframes auroraDrift3 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(-30px, 30px) scale(0.9); }
 }
 @media (max-width: 900px) {
   .hero-grid { grid-template-columns: 1fr; }
@@ -731,6 +801,7 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
 <main id="idx-main">
 
   <section class="hero">
+    <div class="hero-aurora" aria-hidden="true"><span></span><span></span><span></span></div>
     <div class="container hero-grid">
       <div>
         <div class="badge-row">
@@ -785,23 +856,23 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
   </section>
 
   <section class="section-alt">
-    <div class="container feature-grid">
-      <div class="feature-item">
+    <div class="container feature-grid reveal-group">
+      <div class="feature-item reveal">
         <span class="icon-square"><svg><use href="#idx-icon-shield"></use></svg></span>
         <h3>One Trusted Advisor</h3>
         <p>Insurance and Tax Preparation from One Licensed Advisor — No Juggling Separate Contacts.</p>
       </div>
-      <div class="feature-item">
+      <div class="feature-item reveal">
         <span class="icon-square"><svg><use href="#idx-icon-chat"></use></svg></span>
         <h3>Trilingual Team</h3>
         <p>We Explain Your Coverage and Your Return Clearly in English, Punjabi, or Hindi.</p>
       </div>
-      <div class="feature-item">
+      <div class="feature-item reveal">
         <span class="icon-square"><svg><use href="#idx-icon-globe"></use></svg></span>
         <h3>Local &amp; Nationwide</h3>
         <p>Insurance for California; Tax Preparation for Clients in All 50 States.</p>
       </div>
-      <div class="feature-item">
+      <div class="feature-item reveal">
         <span class="icon-square"><svg><use href="#idx-icon-home"></use></svg></span>
         <h3>Every Need, One Roof</h3>
         <p>Auto, Home, Commercial, Life, and Health Insurance, Plus Tax Preparation — Together.</p>
@@ -816,8 +887,8 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
         <h2>Coverage &amp; Services Built Around Your Life</h2>
         <p class="lede">From Your Everyday Car and Home to Your Business, Your Family's Future, and Your Taxes.</p>
       </div>
-      <div class="cards-grid">
-        <div class="service-card">
+      <div class="cards-grid reveal-group">
+        <div class="service-card reveal">
           <span class="icon-square"><svg><use href="#idx-icon-car"></use></svg></span>
           <h3>Auto Insurance</h3>
           <p>Liability, Collision, and Comprehensive Coverage for Your Everyday Vehicle.</p>
@@ -827,7 +898,7 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
           </ul>
           <a class="card-link" href="insurance.html">Learn More <svg><use href="#idx-icon-arrow"></use></svg></a>
         </div>
-        <div class="service-card">
+        <div class="service-card reveal">
           <span class="icon-square"><svg><use href="#idx-icon-home"></use></svg></span>
           <h3>Home &amp; Renters Insurance</h3>
           <p>Homeowners, Renters, and Property Coverage for California Residences.</p>
@@ -837,7 +908,7 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
           </ul>
           <a class="card-link" href="insurance.html">Learn More <svg><use href="#idx-icon-arrow"></use></svg></a>
         </div>
-        <div class="service-card">
+        <div class="service-card reveal">
           <span class="icon-square"><svg><use href="#idx-icon-truck"></use></svg></span>
           <h3>Commercial &amp; Trucking</h3>
           <p>BOP, General Liability, and Workers' Comp, Plus Semi Truck Coverage — Available Nationwide.</p>
@@ -847,7 +918,7 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
           </ul>
           <a class="card-link" href="insurance.html">Learn More <svg><use href="#idx-icon-arrow"></use></svg></a>
         </div>
-        <div class="service-card">
+        <div class="service-card reveal">
           <span class="icon-square"><svg><use href="#idx-icon-heart"></use></svg></span>
           <h3>Life Insurance</h3>
           <p>Coverage Options to Help Protect Your Family's Future — Available Nationwide.</p>
@@ -856,7 +927,7 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
           </ul>
           <a class="card-link" href="insurance.html">Learn More <svg><use href="#idx-icon-arrow"></use></svg></a>
         </div>
-        <div class="service-card">
+        <div class="service-card reveal">
           <span class="icon-square"><svg><use href="#idx-icon-health"></use></svg></span>
           <h3>Health Insurance</h3>
           <p>Certified Covered California Enrollment Help for Individuals and Families.</p>
@@ -865,7 +936,7 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
           </ul>
           <a class="card-link" href="covered-ca.html">Learn More <svg><use href="#idx-icon-arrow"></use></svg></a>
         </div>
-        <div class="service-card">
+        <div class="service-card reveal">
           <span class="icon-square"><svg><use href="#idx-icon-doc"></use></svg></span>
           <h3>Tax Preparation</h3>
           <p>Individual and Business Returns, E-Filing, and ITIN Application Help — Nationwide.</p>
@@ -900,26 +971,26 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
         <p>Arun Is a Licensed California Insurance Producer and an IRS Enrolled Agent (EA), Personally Handling Both Sides of the Business in English, Punjabi, and Hindi.</p>
         <div class="stats-row">
           <div>
-            <div class="stat-num">3</div>
+            <div class="stat-num count-up">3</div>
             <div class="stat-label">Languages Spoken</div>
           </div>
           <div>
-            <div class="stat-num">50</div>
+            <div class="stat-num count-up">50</div>
             <div class="stat-label">States for Tax Filing</div>
           </div>
         </div>
       </div>
-      <div class="trust-card">
+      <div class="trust-card reveal-group">
         <h3>Licensed &amp; Trusted</h3>
-        <div class="trust-row">
+        <div class="trust-row reveal">
           <span class="icon-square"><svg><use href="#idx-icon-shield"></use></svg></span>
           <div><strong>Insurance</strong><span>California Insurance Producer License #4173270</span></div>
         </div>
-        <div class="trust-row">
+        <div class="trust-row reveal">
           <span class="icon-square"><svg><use href="#idx-icon-doc"></use></svg></span>
           <div><strong>Tax</strong><span>IRS Enrolled Agent (EA) · Enrollment No. 00172538-EA</span></div>
         </div>
-        <div class="trust-row">
+        <div class="trust-row reveal">
           <span class="icon-square"><svg><use href="#idx-icon-badge"></use></svg></span>
           <div><strong>Coverage</strong><span>Errors and Omissions Insurance Maintained in Force</span></div>
         </div>
@@ -933,32 +1004,32 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
         <div class="eyebrow" style="justify-content:center">Common Questions</div>
         <h2>Frequently Asked Questions</h2>
       </div>
-      <div class="faq-list">
-        <details class="faq-item">
+      <div class="faq-list reveal-group">
+        <details class="faq-item reveal">
           <summary>Do You Speak Punjabi or Hindi?</summary>
           <p class="faq-answer">Yes. Arun and the Team Communicate in English, Punjabi, and Hindi for Both Insurance and Tax Matters.</p>
         </details>
-        <details class="faq-item">
+        <details class="faq-item reveal">
           <summary>What Insurance Do You Offer?</summary>
           <p class="faq-answer">Personal Auto, Homeowners, and Renters Insurance for California; Commercial (BOP, General Liability, Workers' Comp), Semi Truck, and Life Insurance Nationwide; Plus Health Coverage Through Covered California.</p>
         </details>
-        <details class="faq-item">
+        <details class="faq-item reveal">
           <summary>Do You Also Handle Tax Preparation?</summary>
           <p class="faq-answer">Yes — Individual and Business Tax Returns, E-Filing, and ITIN Application Help, for Clients in All 50 States.</p>
         </details>
-        <details class="faq-item">
+        <details class="faq-item reveal">
           <summary>Do You Write Commercial and Owner-Operator/Trucking Policies?</summary>
           <p class="faq-answer">Yes. We Work with Truck Owner-Operators and Commercial Businesses Nationwide.</p>
         </details>
-        <details class="faq-item">
+        <details class="faq-item reveal">
           <summary>Can You Help Me Enroll in a Covered California Health Plan?</summary>
           <p class="faq-answer">Yes, Arun Is a Certified Covered California Agent. Visit Our <a href="covered-ca.html">Covered California Page</a> for Details.</p>
         </details>
-        <details class="faq-item">
+        <details class="faq-item reveal">
           <summary>Where Are You Located, and Who Do You Serve?</summary>
           <p class="faq-answer">We're Based in Modesto, CA. Personal Auto, Home, and Renters Insurance Is Offered to Clients Across California; Commercial Insurance, Life Insurance, and Tax Preparation Are Available Nationwide.</p>
         </details>
-        <details class="faq-item">
+        <details class="faq-item reveal">
           <summary>What Are Your Hours?</summary>
           <p class="faq-answer">Open 7 Days a Week, 9am to 6pm Pacific. Call or WhatsApp Us at (350) 250-0927.</p>
         </details>
@@ -1184,6 +1255,7 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
 <main id="ins-main">
 
   <section class="hero">
+    <div class="hero-aurora" aria-hidden="true"><span></span><span></span><span></span></div>
     <div class="container hero-grid">
       <div>
         <div class="badge-row">
@@ -1224,33 +1296,33 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
         <div class="eyebrow" style="justify-content:center">Lines of Coverage</div>
         <h2>Every Line, One Local Agent</h2>
       </div>
-      <div class="cards-grid">
-        <div class="service-card">
+      <div class="cards-grid reveal-group">
+        <div class="service-card reveal">
           <span class="icon-square"><svg><use href="#ins-icon-car"></use></svg></span>
           <h3>Personal Auto</h3>
           <p>Liability, Collision, and Comprehensive Coverage for Your Everyday Vehicle, with Options for Multi-Car Households.</p>
         </div>
-        <div class="service-card">
+        <div class="service-card reveal">
           <span class="icon-square"><svg><use href="#ins-icon-home"></use></svg></span>
           <h3>Homeowners &amp; Renters</h3>
           <p>Coverage for California Homeowners and Renters, Protecting Your Dwelling and Personal Property.</p>
         </div>
-        <div class="service-card">
+        <div class="service-card reveal">
           <span class="icon-square"><svg><use href="#ins-icon-truck"></use></svg></span>
           <h3>Commercial: BOP, General Liability &amp; Workers' Comp</h3>
           <p>Business Owner's Policies, General Liability, and Workers' Compensation for Small Businesses — Available Nationwide.</p>
         </div>
-        <div class="service-card">
+        <div class="service-card reveal">
           <span class="icon-square"><svg><use href="#ins-icon-truck"></use></svg></span>
           <h3>Trucking &amp; Owner-Operator</h3>
           <p>We Work with Truck Owner-Operators Nationwide on Commercial Auto and Cargo-Related Coverage Needs.</p>
         </div>
-        <div class="service-card">
+        <div class="service-card reveal">
           <span class="icon-square"><svg><use href="#ins-icon-heart"></use></svg></span>
           <h3>Life Insurance</h3>
           <p>Coverage Options to Help Protect Your Family's Financial Future — Available Nationwide.</p>
         </div>
-        <div class="service-card">
+        <div class="service-card reveal">
           <span class="icon-square"><svg><use href="#ins-icon-health"></use></svg></span>
           <h3>Health Insurance (Covered California)</h3>
           <p>As a Certified Covered California Agent, We Help Individuals and Families Enroll in Health Coverage.</p>
@@ -1264,23 +1336,23 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
     <div class="container">
       <div class="eyebrow" style="justify-content:center">Why Insure with Us</div>
       <h2 class="text-center">A Licensed, Local, Trilingual Agent</h2>
-      <div class="why-list">
-        <div class="why-row">
+      <div class="why-list reveal-group">
+        <div class="why-row reveal">
           <span class="num">01</span>
           <h3>Licensed Agent</h3>
           <p>California Insurance Producer License #4173270, in Good Standing.</p>
         </div>
-        <div class="why-row">
+        <div class="why-row reveal">
           <span class="num">02</span>
           <h3>Trilingual Service</h3>
           <p>We Explain Your Policy Clearly in English, Punjabi, or Hindi — No Translation Gaps on Coverage Details.</p>
         </div>
-        <div class="why-row">
+        <div class="why-row reveal">
           <span class="num">03</span>
           <h3>California &amp; Beyond</h3>
           <p>Personal Auto, Home, and Renters Coverage for California Families — Commercial and Life Insurance Available Nationwide.</p>
         </div>
-        <div class="why-row">
+        <div class="why-row reveal">
           <span class="num">04</span>
           <h3>Coordinated with Your Taxes</h3>
           <p>One Advisor for Your Insurance and Your Tax Preparation, Instead of Separate Contacts.</p>
@@ -1295,24 +1367,24 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
         <div class="eyebrow" style="justify-content:center">Common Questions</div>
         <h2>Insurance FAQ</h2>
       </div>
-      <div class="faq-list">
-        <details class="faq-item">
+      <div class="faq-list reveal-group">
+        <details class="faq-item reveal">
           <summary>Do You Write Commercial and Owner-Operator/Trucking Policies?</summary>
           <p class="faq-answer">Yes. We Work with Commercial Businesses and Truck Owner-Operators Nationwide.</p>
         </details>
-        <details class="faq-item">
+        <details class="faq-item reveal">
           <summary>Do You Offer Life Insurance Too?</summary>
           <p class="faq-answer">Yes, Alongside Auto, Home, Renters, Commercial, Trucking, and Health Coverage.</p>
         </details>
-        <details class="faq-item">
+        <details class="faq-item reveal">
           <summary>Can You Help Me Enroll in a Covered California Health Plan?</summary>
           <p class="faq-answer">Yes — Arun Is a Certified Covered California Agent. See Our <a href="covered-ca.html">Covered California Page</a> for More.</p>
         </details>
-        <details class="faq-item">
+        <details class="faq-item reveal">
           <summary>Do You Also Handle Tax Preparation?</summary>
           <p class="faq-answer">Yes. Visit Our <a href="taxes.html">Tax Preparation Page</a> for Details on Individual and Business Filing.</p>
         </details>
-        <details class="faq-item">
+        <details class="faq-item reveal">
           <summary>What Areas Do You Serve?</summary>
           <p class="faq-answer">We're Based in Modesto, CA. Personal Auto, Home, and Renters Insurance Is Available to Clients Across California; Commercial and Life Insurance Are Available Nationwide.</p>
         </details>
@@ -1536,6 +1608,7 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
 <main id="tax-main">
 
   <section class="hero">
+    <div class="hero-aurora" aria-hidden="true"><span></span><span></span><span></span></div>
     <div class="container hero-grid">
       <div>
         <div class="badge-row">
@@ -1580,23 +1653,23 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
         <h2>What Is an Enrolled Agent?</h2>
         <p class="lede">An Enrolled Agent (EA) is the IRS's highest credential for tax professionals — federally licensed by the U.S. Department of the Treasury, not limited to a single state the way a CPA license is.</p>
       </div>
-      <div class="feature-grid">
-        <div class="feature-item">
+      <div class="feature-grid reveal-group">
+        <div class="feature-item reveal">
           <span class="icon-square"><svg><use href="#tax-icon-badge"></use></svg></span>
           <h3>Licensed by the IRS</h3>
           <p>Enrolled to practice before the IRS by the U.S. Department of the Treasury — not licensed state by state like a CPA.</p>
         </div>
-        <div class="feature-item">
+        <div class="feature-item reveal">
           <span class="icon-square"><svg><use href="#tax-icon-doc"></use></svg></span>
           <h3>Earned Through Rigorous Testing</h3>
           <p>EA status requires passing a comprehensive three-part IRS exam covering individual returns, business returns, and representation.</p>
         </div>
-        <div class="feature-item">
+        <div class="feature-item reveal">
           <span class="icon-square"><svg><use href="#tax-icon-gavel"></use></svg></span>
           <h3>Unlimited Representation Rights</h3>
           <p>Can represent taxpayers before the IRS in audits, collections, and appeals — a right shared only with attorneys and CPAs.</p>
         </div>
-        <div class="feature-item">
+        <div class="feature-item reveal">
           <span class="icon-square"><svg><use href="#tax-icon-globe"></use></svg></span>
           <h3>Nationwide, Ongoing Education</h3>
           <p>Must complete continuing education to keep the license active, and can practice before the IRS in any state.</p>
@@ -1618,28 +1691,28 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
     <div class="container">
       <div class="eyebrow" style="justify-content:center">Why File with Us</div>
       <h2 class="text-center">Trusted, Local, Trilingual Filing</h2>
-      <div class="why-list">
-        <div class="why-row">
+      <div class="why-list reveal-group">
+        <div class="why-row reveal">
           <span class="num">01</span>
           <h3>IRS Enrolled Agent (EA)</h3>
           <p>Federally licensed by the U.S. Department of the Treasury — Enrollment No. 00172538-EA.</p>
         </div>
-        <div class="why-row">
+        <div class="why-row reveal">
           <span class="num">02</span>
           <h3>Unlimited Representation Rights</h3>
           <p>Can represent you before the IRS in audits, collections, and appeals, in any state.</p>
         </div>
-        <div class="why-row">
+        <div class="why-row reveal">
           <span class="num">03</span>
           <h3>Nationwide Filing</h3>
           <p>Federal and State Returns Filed in All 50 States — Not Just California.</p>
         </div>
-        <div class="why-row">
+        <div class="why-row reveal">
           <span class="num">04</span>
           <h3>Trilingual Team</h3>
           <p>We Explain Your Return Clearly in English, Punjabi, or Hindi.</p>
         </div>
-        <div class="why-row">
+        <div class="why-row reveal">
           <span class="num">05</span>
           <h3>Coordinated with Your Insurance</h3>
           <p>One Advisor for Your Taxes and Your Auto, Home, Life, or Health Coverage.</p>
@@ -1688,8 +1761,8 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
         <h2>Tax Services</h2>
         <p class="lede">Pick the Service That Fits, or Ask About More Than One.</p>
       </div>
-      <div class="cards-grid">
-        <div class="service-card">
+      <div class="cards-grid reveal-group">
+        <div class="service-card reveal">
           <span class="icon-square"><svg><use href="#tax-icon-person"></use></svg></span>
           <h3>Individual Tax Returns</h3>
           <p>Whether You're a W-2 Employee, Self-Employed, or Somewhere in Between.</p>
@@ -1698,7 +1771,7 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
             <li><svg><use href="#tax-icon-check"></use></svg>Standard &amp; Itemized Deductions</li>
           </ul>
         </div>
-        <div class="service-card">
+        <div class="service-card reveal">
           <span class="icon-square"><svg><use href="#tax-icon-briefcase"></use></svg></span>
           <h3>Business Tax Returns</h3>
           <p>Sole Proprietors, Partnerships, and Small Businesses.</p>
@@ -1707,7 +1780,7 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
             <li><svg><use href="#tax-icon-check"></use></svg>Partnerships &amp; Small Corporations</li>
           </ul>
         </div>
-        <div class="service-card">
+        <div class="service-card reveal">
           <span class="icon-square"><svg><use href="#tax-icon-globe"></use></svg></span>
           <h3>E-Filing, Federal &amp; Any State</h3>
           <p>Electronic Filing Wherever You Live, in All 50 States.</p>
@@ -1716,7 +1789,7 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
             <li><svg><use href="#tax-icon-check"></use></svg>State E-Filing, All 50 States</li>
           </ul>
         </div>
-        <div class="service-card">
+        <div class="service-card reveal">
           <span class="icon-square"><svg><use href="#tax-icon-doc"></use></svg></span>
           <h3>ITIN Assistance</h3>
           <p>Help Applying for an Individual Taxpayer Identification Number.</p>
@@ -1725,7 +1798,7 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
             <li><svg><use href="#tax-icon-check"></use></svg>Guidance for Non-SSN Filers</li>
           </ul>
         </div>
-        <div class="service-card">
+        <div class="service-card reveal">
           <span class="icon-square"><svg><use href="#tax-icon-clock"></use></svg></span>
           <h3>Prior-Year Returns</h3>
           <p>Haven't Filed in a While? We'll Help You Catch Up.</p>
@@ -1734,7 +1807,7 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
             <li><svg><use href="#tax-icon-check"></use></svg>Multiple-Year Catch-Up Filing</li>
           </ul>
         </div>
-        <div class="service-card">
+        <div class="service-card reveal">
           <span class="icon-square"><svg><use href="#tax-icon-gavel"></use></svg></span>
           <h3>IRS Audit &amp; Notice Representation</h3>
           <p>As an Enrolled Agent, Arun Can Represent You Directly Before the IRS.</p>
@@ -1754,40 +1827,40 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
         <div class="eyebrow" style="justify-content:center">Find Out</div>
         <h2>Frequently Asked Questions</h2>
       </div>
-      <div class="faq-list">
-        <details class="faq-item">
+      <div class="faq-list reveal-group">
+        <details class="faq-item reveal">
           <summary>What Is an Enrolled Agent (EA)?</summary>
           <p class="faq-answer">An Enrolled Agent is a tax practitioner licensed by the U.S. Department of the Treasury with unlimited rights to represent taxpayers before the IRS — the IRS's highest credential for tax professionals.</p>
         </details>
-        <details class="faq-item">
+        <details class="faq-item reveal">
           <summary>Are You a CPA?</summary>
           <p class="faq-answer">No — Arun is an IRS Enrolled Agent (EA), a federal tax credential focused specifically on taxation, with unlimited rights to represent clients before the IRS nationwide.</p>
         </details>
-        <details class="faq-item">
+        <details class="faq-item reveal">
           <summary>Can You Represent Me if I Get an IRS Audit or Notice?</summary>
           <p class="faq-answer">Yes. As an Enrolled Agent, Arun can represent you directly before the IRS for audits, notices, and collections.</p>
         </details>
-        <details class="faq-item">
+        <details class="faq-item reveal">
           <summary>Do You File Taxes Outside of California?</summary>
           <p class="faq-answer">Yes — We File Federal and State Returns for Clients Nationwide, in All 50 States.</p>
         </details>
-        <details class="faq-item">
+        <details class="faq-item reveal">
           <summary>Can You Help Me Apply for an ITIN?</summary>
           <p class="faq-answer">Yes, We Assist with New ITIN Applications for Individuals Without a Social Security Number.</p>
         </details>
-        <details class="faq-item">
+        <details class="faq-item reveal">
           <summary>Do You Prepare Business Tax Returns?</summary>
           <p class="faq-answer">Yes, for Sole Proprietors, Partnerships, and Small Businesses.</p>
         </details>
-        <details class="faq-item">
+        <details class="faq-item reveal">
           <summary>What if I Haven't Filed in a Few Years?</summary>
           <p class="faq-answer">We Can Help with Prior-Year and Back-Tax Return Preparation.</p>
         </details>
-        <details class="faq-item">
+        <details class="faq-item reveal">
           <summary>Do You Speak Punjabi or Hindi?</summary>
           <p class="faq-answer">Yes, We Explain Your Return Clearly in English, Punjabi, or Hindi.</p>
         </details>
-        <details class="faq-item">
+        <details class="faq-item reveal">
           <summary>Can You Also Help with My Insurance?</summary>
           <p class="faq-answer">Yes — Visit Our <a href="insurance.html">Insurance Page</a> for Auto, Home, Commercial, Trucking, Life, and Health Coverage.</p>
         </details>
@@ -2049,16 +2122,16 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
         <div class="eyebrow" style="justify-content:center">Common Questions</div>
         <h2>Covered California FAQ</h2>
       </div>
-      <div class="faq-list">
-        <details class="faq-item">
+      <div class="faq-list reveal-group">
+        <details class="faq-item reveal">
           <summary>Are You Affiliated with Covered California?</summary>
           <p class="faq-answer">No. Pacific Tax and Insurance Is a Certified Insurance Agent with Covered California, but Is Not Employed by, Affiliated with, or Endorsed by Covered California.</p>
         </details>
-        <details class="faq-item">
+        <details class="faq-item reveal">
           <summary>Do You Speak Punjabi or Hindi?</summary>
           <p class="faq-answer">Yes, Enrollment Help Is Available in English, Punjabi, and Hindi.</p>
         </details>
-        <details class="faq-item">
+        <details class="faq-item reveal">
           <summary>Can You Also Help with My Taxes or Other Insurance?</summary>
           <p class="faq-answer">Yes — See Our <a href="taxes.html">Tax Preparation</a> and <a href="insurance.html">Insurance</a> Pages.</p>
         </details>
@@ -2492,6 +2565,49 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
         var rest = parts.join('-');
         showPage(key, rest ? (PREFIX[key] + '-' + rest) : null);
       }
+    }
+
+    var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    function animateCount(el) {
+      var target = parseInt(el.textContent, 10);
+      if (isNaN(target)) { return; }
+      if (reduceMotion) { el.textContent = target; return; }
+      var duration = 1200;
+      var startTime = null;
+      function step(ts) {
+        if (!startTime) { startTime = ts; }
+        var progress = Math.min((ts - startTime) / duration, 1);
+        el.textContent = Math.floor(target * progress);
+        if (progress < 1) {
+          requestAnimationFrame(step);
+        } else {
+          el.textContent = target;
+        }
+      }
+      requestAnimationFrame(step);
+    }
+
+    if ('IntersectionObserver' in window) {
+      var revealObserver = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (!entry.isIntersecting) { return; }
+          entry.target.classList.add('is-visible');
+          revealObserver.unobserve(entry.target);
+        });
+      }, { threshold: 0.15 });
+      document.querySelectorAll('.reveal').forEach(function (el) { revealObserver.observe(el); });
+
+      var countObserver = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (!entry.isIntersecting) { return; }
+          animateCount(entry.target);
+          countObserver.unobserve(entry.target);
+        });
+      }, { threshold: 0.5 });
+      document.querySelectorAll('.count-up').forEach(function (el) { countObserver.observe(el); });
+    } else {
+      document.querySelectorAll('.reveal').forEach(function (el) { el.classList.add('is-visible'); });
     }
   });
 })();
