@@ -44,6 +44,25 @@ html { scroll-padding-top: 88px; }
   to { filter: blur(0); opacity: 1; }
 }
 
+/* Slow blur-in transition when navigating from one page to another (native browser page navigation) */
+@view-transition {
+  navigation: auto;
+}
+::view-transition-old(root) {
+  animation: pageBlurOut 0.5s ease-in forwards;
+}
+::view-transition-new(root) {
+  animation: pageBlurIn 1.1s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes pageBlurOut {
+  from { opacity: 1; filter: blur(0); }
+  to { opacity: 0; filter: blur(16px); }
+}
+@keyframes pageBlurIn {
+  from { opacity: 0; filter: blur(16px); }
+  to { opacity: 1; filter: blur(0); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 }
@@ -635,6 +654,16 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
 .prose ul li { padding: 0.15rem 0; }
 
 .page[hidden] { display: none !important; }
+.page-fade-out { animation: pageFadeOut 0.5s ease-in forwards; }
+.page-fade-in { animation: pageFadeIn 1.1s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+@keyframes pageFadeOut {
+  from { opacity: 1; filter: blur(0); }
+  to { opacity: 0; filter: blur(16px); }
+}
+@keyframes pageFadeIn {
+  from { opacity: 0; filter: blur(16px); }
+  to { opacity: 1; filter: blur(0); }
+}
 </style>
 </head>
 <body>
@@ -2337,16 +2366,53 @@ section { padding: clamp(3rem, 6vw, 5rem) 0; }
   };
   var PREFIX = { index: 'idx', insurance: 'ins', taxes: 'tax', 'covered-ca': 'cca', privacy: 'prv' };
 
+  var navToken = 0;
+
   function showPage(key, targetId) {
+    var myToken = ++navToken;
+    var next = document.querySelector('.page[data-page="' + key + '"]');
+    if (!next) { return; }
+    var current = document.querySelector('.page:not([hidden])');
+
+    // defensively settle any page left mid-transition by an interrupted earlier nav
     document.querySelectorAll('.page').forEach(function (p) {
-      p.hidden = p.getAttribute('data-page') !== key;
+      if (p !== current && p !== next) {
+        p.classList.remove('page-fade-out', 'page-fade-in');
+        p.hidden = true;
+      }
     });
-    var active = document.querySelector('.page[data-page="' + key + '"]');
-    if (active) { document.title = active.getAttribute('data-title') || document.title; }
-    if (targetId) {
-      blurIn(targetId);
+
+    function enter() {
+      if (myToken !== navToken) { return; }
+      next.hidden = false;
+      next.classList.remove('page-fade-in');
+      void next.offsetWidth;
+      next.classList.add('page-fade-in');
+      document.title = next.getAttribute('data-title') || document.title;
+      if (targetId) {
+        blurIn(targetId);
+      } else {
+        window.scrollTo(0, 0);
+      }
+      next.addEventListener('animationend', function done(e) {
+        if (e.target !== next) { return; }
+        next.removeEventListener('animationend', done);
+        if (myToken === navToken) { next.classList.remove('page-fade-in'); }
+      });
+    }
+
+    if (current && current !== next) {
+      current.classList.add('page-fade-out');
+      current.addEventListener('animationend', function done(e) {
+        if (e.target !== current) { return; }
+        current.removeEventListener('animationend', done);
+        if (myToken !== navToken) { return; }
+        current.hidden = true;
+        current.classList.remove('page-fade-out');
+        enter();
+      });
     } else {
-      window.scrollTo(0, 0);
+      enter();
     }
   }
 
