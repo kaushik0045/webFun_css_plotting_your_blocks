@@ -76,4 +76,39 @@
       });
     });
   });
+
+  // 3D tilt on cards
+  var fine = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+  var calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (fine && !calm) {
+    document.querySelectorAll('.tilt').forEach(function (el) {
+      var max = parseFloat(el.getAttribute('data-tilt') || '10');
+      el.addEventListener('pointermove', function (e) {
+        var b = el.getBoundingClientRect();
+        var x = (e.clientX - b.left) / b.width, y = (e.clientY - b.top) / b.height;
+        el.style.transform = 'perspective(900px) rotateX(' + ((0.5 - y) * max) + 'deg) rotateY(' + ((x - 0.5) * max) + 'deg) translateZ(8px)';
+        el.style.setProperty('--gx', (x * 100) + '%'); el.style.setProperty('--gy', (y * 100) + '%');
+      });
+      el.addEventListener('pointerleave', function () { el.style.transform = ''; });
+    });
+  }
+
+  // Count-up numbers
+  var nums = document.querySelectorAll('[data-count]');
+  function run(el) {
+    var end = parseFloat(el.getAttribute('data-count')), dec = (el.getAttribute('data-count').split('.')[1] || '').length;
+    if (calm) { el.textContent = end.toFixed(dec); return; }
+    var t0 = null;
+    function step(now) {
+      if (t0 === null) t0 = now;
+      var p = Math.min(1, (now - t0) / 1600), v = end * (1 - Math.pow(1 - p, 3));
+      el.textContent = v.toFixed(dec);
+      if (p < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+  if ('IntersectionObserver' in window) {
+    var cio = new IntersectionObserver(function (es) { es.forEach(function (e) { if (e.isIntersecting) { run(e.target); cio.unobserve(e.target); } }); }, { threshold: 0.6 });
+    nums.forEach(function (n) { cio.observe(n); });
+  }
 })();

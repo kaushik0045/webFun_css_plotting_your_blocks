@@ -33,7 +33,7 @@
   </div>
 </header>
 <main id="main">
-<section class="hero hero--page" style="background-image:url('images/hero.jpg')">
+<section class="hero hero--page" data-scene="mini" style="background-image:url('images/hero.jpg')">
   <div class="container">
     <p class="small-upper">About Us</p>
     <h1>About <span class='red'>JRP</span></h1>
@@ -87,7 +87,7 @@
     <div class="section-title"><h2>Our <span>Team</span></h2><p>Driven by purpose, committed to our investors.</p></div>
     <!-- TEAM: add more members (photo in images/, name, title). -->
     <div class="team">
-      <div class="member reveal"><div class="pic"><img src="images/raman-singh.jpg" alt="Raman Singh"></div><h3>Raman Singh</h3><p>Investor Relations</p><a href="mailto:ramansingh@jrpinvestmentgrp.com">Email Raman</a></div>
+      <div class="member reveal tilt" data-tilt="14"><div class="pic"><img src="images/raman-singh.jpg" alt="Raman Singh"></div><h3>Raman Singh</h3><p>Investor Relations</p><a href="mailto:ramansingh@jrpinvestmentgrp.com">Email Raman</a></div>
       <div class="member member--empty reveal"><div class="pic">+</div><h3>Team Member</h3><p>Title</p></div>
       <div class="member member--empty reveal"><div class="pic">+</div><h3>Team Member</h3><p>Title</p></div>
     </div>
@@ -122,6 +122,8 @@
     </div>
   </div>
 </footer>
+<script src="js/vendor/three.min.js" defer></script>
+<script src="js/scene.js" defer></script>
 <script src="js/main.js"></script>
 </body>
 </html>

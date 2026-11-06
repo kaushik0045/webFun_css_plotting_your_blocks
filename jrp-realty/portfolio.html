@@ -33,7 +33,7 @@
   </div>
 </header>
 <main id="main">
-<section class="hero hero--page" style="background-image:url('images/villa-ticinio-2.jpg')">
+<section class="hero hero--page" data-scene="mini" style="background-image:url('images/villa-ticinio-2.jpg')">
   <div class="container">
     <p class="small-upper">Our Portfolio</p>
     <h1>Real assets. <span class='red'>Real income.</span></h1>
@@ -48,15 +48,15 @@
       <button class="filter" data-filter="funded" aria-pressed="false">Funded Projects</button>
     </div>
     <div class="projects" id="portfolio-grid">
-      <article class="project property reveal" data-cat="current">
+      <article class="project property reveal tilt" data-cat="current">
         <div class="ph"><img src="images/villa-ticinio-2.jpg" alt="Villa Ticinio Apartments, Manteca, California" loading="lazy"><span class="badge">Current Project</span></div>
         <h3>Villa Ticinio Apartments</h3>
         <div class="loc">Manteca, California</div><ul class="facts"><li><span>Property type</span><b>Multifamily</b></li><li><span>Size</span><b>324 units</b></li><li><span>Address</span><b>2298 W. Louise Ave, Manteca, CA 95337</b></li></ul><p class="desc">An ongoing investment in 324 multifamily apartment homes in Manteca: every door is an opportunity for growth.</p>
-      </article><article class="project property reveal" data-cat="current">
+      </article><article class="project property reveal tilt" data-cat="current">
         <div class="ph"><img src="images/truck-stop-2.jpg" alt="Truck Stop &amp; Plaza, Sacramento, California" loading="lazy"><span class="badge">Current Project</span></div>
         <h3>Truck Stop &amp; Plaza</h3>
         <div class="loc">Sacramento, California</div><ul class="facts"><li><span>Property type</span><b>Truck stop &amp; plaza</b></li><li><span>Size</span><b>17.5 acres</b></li><li><span>Address</span><b>2264 Meister Way, Sacramento, CA 95835</b></li></ul><p class="desc">An upcoming truck stop and plaza on 17.5 acres right next to Sacramento International Airport.</p>
-      </article><article class="project property reveal" data-cat="funded">
+      </article><article class="project property reveal tilt" data-cat="funded">
         <div class="ph"><img src="images/best-western-plus.jpg" alt="Best Western Plus, Manteca, California" loading="lazy"><span class="badge badge--funded">Funded</span></div>
         <h3>Best Western Plus</h3>
         <div class="loc">Manteca, California</div><ul class="facts"><li><span>Property type</span><b>Hotel</b></li><li><span>Size</span><b>101 rooms</b></li><li><span>Acquired</span><b>November 2022</b></li><li><span>Address</span><b>1415 Yosemite Ave, Manteca, CA 95336</b></li></ul><p class="desc">A fully funded 101-room hotel just off Freeway 99, backed by our investors.</p>
@@ -65,7 +65,7 @@
   </div>
 </section>
 <section class="photo-band" style="background-image:url('images/truck-stop-2.jpg')">
-  <div class="container"><div class="panel reveal">
+  <div class="container"><div class="panel reveal tilt" data-tilt="6">
     <h2>Want the <b>next opportunity</b>?</h2>
     <p>Join our investor list and we&rsquo;ll reach out as soon as a new project opens.</p>
     <a class="btn" href="contact.html">Join the Investor List</a>
@@ -100,6 +100,8 @@
     </div>
   </div>
 </footer>
+<script src="js/vendor/three.min.js" defer></script>
+<script src="js/scene.js" defer></script>
 <script src="js/main.js"></script>
 </body>
 </html>

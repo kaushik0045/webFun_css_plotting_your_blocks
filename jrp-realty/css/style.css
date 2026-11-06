@@ -274,3 +274,55 @@ p { margin: 0 0 1em; }
 .reveal { opacity: 0; transform: translateY(16px); transition: opacity .7s ease, transform .7s ease; }
 .reveal.visible { opacity: 1; transform: none; }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .reveal { opacity: 1; transform: none; transition: none; } .project .ph img { transition: none; } }
+
+/* =========== 3D layer =========== */
+.scene-canvas { position: absolute; inset: 0; z-index: -2; display: block; }
+.hero.has-3d { background-image: none !important; background: radial-gradient(ellipse at 50% 120%, #2a0503 0%, #0a0a0c 55%, #050506 100%); }
+.hero.has-3d::before { background:
+  radial-gradient(ellipse 70% 55% at 50% 45%, rgba(5,5,6,.55) 0%, rgba(5,5,6,.15) 60%, transparent 80%),
+  linear-gradient(180deg, rgba(5,5,6,.65) 0%, transparent 22%, transparent 70%, rgba(11,11,13,1) 100%); }
+.hero.has-3d .container { position: relative; }
+.hero h1, .hero .lead, .hero .tagline, .hero .small-upper { text-shadow: 0 4px 30px rgba(0,0,0,.85); }
+.hero:not(.hero--page) { min-height: 94vh; }
+.hero--page { min-height: 58vh; }
+.scroll-cue { position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%); width: 26px; height: 42px; border: 2px solid rgba(255,255,255,.5); border-radius: 14px; }
+.scroll-cue::after { content: ""; position: absolute; left: 50%; top: 8px; width: 4px; height: 8px; margin-left: -2px; border-radius: 2px; background: var(--red); animation: cue 1.8s infinite; }
+@keyframes cue { 0% { opacity: 0; transform: translateY(0); } 40% { opacity: 1; } 100% { opacity: 0; transform: translateY(14px); } }
+
+/* Emblem: spinning 3D coin */
+.emblem { perspective: 600px; border: 0; box-shadow: none; background: none; }
+.coin { width: 140px; height: 140px; position: relative; transform-style: preserve-3d; animation: coin 9s linear infinite; }
+.coin > span { position: absolute; inset: 0; border-radius: 50%; display: grid; place-items: center; backface-visibility: hidden;
+  background: radial-gradient(circle at 35% 30%, #2a2a30, #0b0b0d 70%); border: 3px solid var(--red);
+  box-shadow: inset 0 0 0 8px rgba(225,6,0,.15), 0 0 40px rgba(225,6,0,.35); font: 700 2.6rem/1 var(--head); color: #fff; }
+.coin > span b { color: var(--red); }
+.coin > .back { transform: rotateY(180deg); font-size: 1.1rem; letter-spacing: .2em; }
+@keyframes coin { to { transform: rotateY(360deg); } }
+
+/* Tilt cards */
+.tilt { transform-style: preserve-3d; transition: transform .25s ease, box-shadow .25s ease; will-change: transform; position: relative; }
+.tilt::after { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity .25s;
+  background: radial-gradient(circle at var(--gx, 50%) var(--gy, 50%), rgba(255,255,255,.18), transparent 55%); }
+.tilt:hover::after { opacity: 1; }
+.project.tilt:hover { box-shadow: 0 30px 50px -20px rgba(0,0,0,.45); }
+.project .ph img { transform: translateZ(0); }
+.tilt .lift { transform: translateZ(40px); }
+
+/* 3D reveal */
+.reveal { opacity: 0; transform: perspective(1100px) rotateX(16deg) translateY(40px) scale(.97); transform-origin: 50% 100%; transition: opacity .9s ease, transform .9s cubic-bezier(.2,.7,.2,1); }
+.reveal.visible { opacity: 1; transform: none; }
+
+/* Deep parallax photo bands */
+@media (hover: hover) and (min-width: 900px) {
+  .photo-band, .team-band, .contact-band { background-attachment: fixed; }
+}
+.photo-band .panel { transform-style: preserve-3d; }
+
+/* Stats: big extruded numbers */
+.stat strong { text-shadow: 1px 1px 0 #d9d9dc, 2px 2px 0 #cfcfd3, 3px 3px 0 #c4c4c9, 4px 4px 0 #b9b9bf, 6px 8px 14px rgba(0,0,0,.18); }
+
+@media (prefers-reduced-motion: reduce) {
+  .coin { animation: none; }
+  .reveal { transform: none; }
+  .scroll-cue::after { animation: none; }
+}

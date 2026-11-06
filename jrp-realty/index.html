@@ -33,14 +33,15 @@
   </div>
 </header>
 <main id="main">
-<section class="hero" style="background-image:url('images/hero.jpg')">
+<section class="hero" data-scene="full" style="background-image:url('images/hero.jpg')">
   <div class="container">
-    <div class="emblem"><span><b>J</b>RP</span></div>
+    <div class="emblem" aria-hidden="true"><div class="coin"><span><span><b>J</b>RP</span></span><span class="back">REALTY</span></div></div>
     <p class="tagline">INVEST<i>|</i>DEVELOP<i>|</i>GROW</p>
     <h1>Unlocking <span class="red">Tomorrow&rsquo;s</span> Wealth</h1>
     <p class="lead">Join the future of smart real estate investing. We find, fund, and manage the properties. You earn the passive income.</p>
     <div class="hero-actions"><a class="btn" href="contact.html">Become an Investor</a><a class="btn btn--ghost" href="portfolio.html">View Portfolio</a></div>
   </div>
+  <span class="scroll-cue" aria-hidden="true"></span>
 </section>
 
 <section class="statement">
@@ -76,21 +77,21 @@
 </section>
 
 <section class="photo-band" style="background-image:url('images/villa-ticinio-1.jpg')">
-  <div class="container"><div class="panel reveal">
+  <div class="container"><div class="panel reveal tilt" data-tilt="6">
     <h2>Who We <b>Are</b></h2>
     <p>JRP Investment Group is a California real estate investment firm. As the General Partner (Sponsor) we carry the detail and the responsibility of every deal, so our Limited Partner investors enjoy a truly hands-off income stream.</p>
     <a class="btn btn--ghost" href="about.html">About Us</a>
   </div></div>
 </section>
 <section class="photo-band" style="background-image:url('images/truck-stop-1.jpg')">
-  <div class="container"><div class="panel reveal">
+  <div class="container"><div class="panel reveal tilt" data-tilt="6">
     <h2>What We <b>Do</b></h2>
     <p>We acquire and manage income-producing real estate: apartment communities, hotels, and commercial projects. Returns are anchored in tenant leases and real operating businesses, governed by strict state and federal laws.</p>
     <a class="btn btn--ghost" href="invest.html">Investing With Us</a>
   </div></div>
 </section>
 <section class="photo-band" style="background-image:url('images/best-western-plus.jpg')">
-  <div class="container"><div class="panel reveal">
+  <div class="container"><div class="panel reveal tilt" data-tilt="6">
     <h2>How We Do <b>It</b></h2>
     <p>A disciplined seven-step process: source, underwrite, inspect, finance, acquire, improve, and exit, with clear reporting to investors at every stage, plus real tax advantages from owning real estate.</p>
     <a class="btn btn--ghost" href="how-we-work.html">Our Process</a>
@@ -99,10 +100,10 @@
 
 <section class="stats">
   <div class="container stats-row">
-    <div class="stat"><strong>3</strong><span>Projects in our portfolio</span></div>
-    <div class="stat"><strong>324</strong><span>Apartment units in development</span></div>
-    <div class="stat"><strong>101</strong><span>Hotel rooms funded</span></div>
-    <div class="stat"><strong>17.5</strong><span>Acres next to Sacramento Airport</span></div>
+    <div class="stat"><strong data-count="3">3</strong><span>Projects in our portfolio</span></div>
+    <div class="stat"><strong data-count="324">324</strong><span>Apartment units in development</span></div>
+    <div class="stat"><strong data-count="101">101</strong><span>Hotel rooms funded</span></div>
+    <div class="stat"><strong data-count="17.5">17.5</strong><span>Acres next to Sacramento Airport</span></div>
   </div>
 </section>
 
@@ -117,15 +118,15 @@
 <section class="section section--light">
   <div class="container">
     <div class="projects">
-      <article class="project property reveal" data-cat="current">
+      <article class="project property reveal tilt" data-cat="current">
         <div class="ph"><img src="images/villa-ticinio-2.jpg" alt="Villa Ticinio Apartments, Manteca, California" loading="lazy"><span class="badge">Current Project</span></div>
         <h3>Villa Ticinio Apartments</h3>
         <div class="loc">Manteca, California</div>
-      </article><article class="project property reveal" data-cat="current">
+      </article><article class="project property reveal tilt" data-cat="current">
         <div class="ph"><img src="images/truck-stop-2.jpg" alt="Truck Stop &amp; Plaza, Sacramento, California" loading="lazy"><span class="badge">Current Project</span></div>
         <h3>Truck Stop &amp; Plaza</h3>
         <div class="loc">Sacramento, California</div>
-      </article><article class="project property reveal" data-cat="funded">
+      </article><article class="project property reveal tilt" data-cat="funded">
         <div class="ph"><img src="images/best-western-plus.jpg" alt="Best Western Plus, Manteca, California" loading="lazy"><span class="badge badge--funded">Funded</span></div>
         <h3>Best Western Plus</h3>
         <div class="loc">Manteca, California</div>
@@ -156,7 +157,7 @@
     <div class="section-title"><h2>Our <span>Team</span></h2><p>Driven by purpose, committed to our investors.</p></div>
     <!-- TEAM: add more members (photo in images/, name, title). -->
     <div class="team">
-      <div class="member reveal"><div class="pic"><img src="images/raman-singh.jpg" alt="Raman Singh"></div><h3>Raman Singh</h3><p>Investor Relations</p><a href="mailto:ramansingh@jrpinvestmentgrp.com">Email Raman</a></div>
+      <div class="member reveal tilt" data-tilt="14"><div class="pic"><img src="images/raman-singh.jpg" alt="Raman Singh"></div><h3>Raman Singh</h3><p>Investor Relations</p><a href="mailto:ramansingh@jrpinvestmentgrp.com">Email Raman</a></div>
       <div class="member member--empty reveal"><div class="pic">+</div><h3>Team Member</h3><p>Title</p></div>
       <div class="member member--empty reveal"><div class="pic">+</div><h3>Team Member</h3><p>Title</p></div>
     </div>
@@ -217,6 +218,8 @@
     </div>
   </div>
 </footer>
+<script src="js/vendor/three.min.js" defer></script>
+<script src="js/scene.js" defer></script>
 <script src="js/main.js"></script>
 </body>
 </html>
