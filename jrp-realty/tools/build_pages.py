@@ -82,6 +82,7 @@ def page(fn, title, desc, body):
 <meta property="og:title" content="{title}">
 <meta property="og:description" content="{desc}">
 <meta property="og:image" content="images/hero.jpg">
+<script>document.documentElement.classList.add("js")</script>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -333,6 +334,7 @@ page("portfolio.html", f"Our Portfolio | {BRAND}",
       <button class="filter" data-filter="current" aria-pressed="false">Current Projects</button>
       <button class="filter" data-filter="funded" aria-pressed="false">Funded Projects</button>
     </div>
+    <h2 class="sr-only">Projects</h2>
     <div class="projects" id="portfolio-grid">
       {"".join(proj(p, True) for p in PROJECTS)}
     </div>
@@ -412,6 +414,7 @@ page("how-we-work.html", f"How We Work | {BRAND}", f"The {BRAND} seven-step inve
  hero_page("truck-stop-1.jpg","How We Work","Our <span class='red'>7-step</span> process","A disciplined, repeatable approach that protects investor capital from first look to final sale.") + f"""
 <section class="section">
   <div class="container">
+    <h2 class="sr-only">The seven steps</h2>
     <div class="steps">{"".join(f'<div class="step reveal"><span class="n">0{i+1}</span><div><h3><small>Step {i+1}: {t}</small>{h}</h3><p>{d}</p></div></div>' for i,(t,h,d) in enumerate(STEPS))}</div>
   </div>
 </section>

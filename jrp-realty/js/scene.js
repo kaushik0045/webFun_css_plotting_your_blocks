@@ -5,6 +5,11 @@
 (function () {
   var hosts = document.querySelectorAll('[data-scene]');
   if (!hosts.length || !window.THREE) return;
+  // Check WebGL support quietly first, so browsers without it just keep the photo.
+  try {
+    var probe = document.createElement('canvas');
+    if (!(window.WebGLRenderingContext && (probe.getContext('webgl') || probe.getContext('experimental-webgl')))) return;
+  } catch (e) { return; }
   var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   hosts.forEach(init);
 

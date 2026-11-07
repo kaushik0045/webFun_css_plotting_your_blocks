@@ -23,6 +23,19 @@
       });
     }, { threshold: 0, rootMargin: '0px 0px 8% 0px' });
     items.forEach(function (el) { io.observe(el); });
+    // Safety net: on slow devices a fast flick can skip past a section before the
+    // observer fires. Reveal everything that is above the bottom of the screen.
+    var ticking = false;
+    var sweep = function () {
+      ticking = false;
+      var limit = window.innerHeight * 1.1;
+      items.forEach(function (el) {
+        if (!el.classList.contains('visible') && el.offsetParent !== null && el.getBoundingClientRect().top < limit) { el.classList.add('visible'); io.unobserve(el); }
+      });
+    };
+    window.addEventListener('scroll', function () { if (!ticking) { ticking = true; requestAnimationFrame(sweep); } }, { passive: true });
+    window.addEventListener('hashchange', function () { setTimeout(sweep, 50); });
+    sweep();
   } else {
     items.forEach(function (el) { el.classList.add('visible'); });
   }
