@@ -29,8 +29,7 @@
 
   // Contact form: opens the visitor's email app with the message filled in.
   // (A static site can't send email by itself — swap for Formspree/Netlify Forms later if wanted.)
-  var form = document.getElementById('contact-form');
-  if (form) {
+  document.querySelectorAll('form.form').forEach(function (form) {
     form.addEventListener('submit', function (ev) {
       ev.preventDefault();
       var d = new FormData(form);
@@ -45,10 +44,10 @@
       window.location.href = 'mailto:ramansingh@jrpinvestmentgrp.com' +
         '?subject=' + encodeURIComponent(subject) +
         '&body=' + encodeURIComponent(body);
-      var note = document.getElementById('form-status');
+      var note = form.querySelector('[role="status"]');
       if (note) note.textContent = 'Your email app should open with your message ready to send.';
     });
-  }
+  });
 
   // Newsletter: opens email app (static site)
   document.querySelectorAll('.newsletter').forEach(function (nf) {
@@ -62,16 +61,16 @@
   });
 
   // Portfolio filters
-  var filters = document.querySelectorAll('.filter');
-  filters.forEach(function (btn) {
+  document.querySelectorAll('.filter').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var f = btn.getAttribute('data-filter');
-      filters.forEach(function (b) {
+      var scope = btn.closest('.container') || document;
+      scope.querySelectorAll('.filter').forEach(function (b) {
         var on = b === btn;
         b.classList.toggle('active', on);
         b.setAttribute('aria-pressed', on ? 'true' : 'false');
       });
-      document.querySelectorAll('#portfolio-grid .property').forEach(function (card) {
+      scope.querySelectorAll('.projects .property').forEach(function (card) {
         card.hidden = !(f === 'all' || card.getAttribute('data-cat') === f);
       });
     });
