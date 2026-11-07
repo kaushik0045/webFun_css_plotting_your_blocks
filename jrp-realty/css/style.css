@@ -309,8 +309,22 @@ p { margin: 0 0 1em; }
 .tilt .lift { transform: translateZ(40px); }
 
 /* 3D reveal */
-.reveal { opacity: 0; transform: perspective(1100px) rotateX(16deg) translateY(40px) scale(.97); transform-origin: 50% 100%; transition: opacity .9s ease, transform .9s cubic-bezier(.2,.7,.2,1); }
-.reveal.visible { opacity: 1; transform: none; }
+/* Slow blur-in reveal */
+.reveal { opacity: 0; filter: blur(22px); transform: none; transition: opacity 2s ease, filter 2.2s cubic-bezier(.25,.6,.25,1); }
+.reveal.visible { opacity: 1; filter: blur(0); }
+.reveal:nth-child(2) { transition-delay: .2s; }
+.reveal:nth-child(3) { transition-delay: .4s; }
+.reveal:nth-child(4) { transition-delay: .6s; }
+.reveal:nth-child(5) { transition-delay: .8s; }
+.reveal:nth-child(6) { transition-delay: 1s; }
+/* Hero text blurs in on load */
+.hero .container > * { animation: blurIn 2.4s cubic-bezier(.25,.6,.25,1) both; }
+.hero .container > :nth-child(2) { animation-delay: .35s; }
+.hero .container > :nth-child(3) { animation-delay: .7s; }
+.hero .container > :nth-child(4) { animation-delay: 1.05s; }
+.hero .container > :nth-child(5) { animation-delay: 1.4s; }
+@keyframes blurIn { from { opacity: 0; filter: blur(24px); } to { opacity: 1; filter: blur(0); } }
+.scene-canvas { animation: blurIn 3s ease both; }
 
 /* Deep parallax photo bands */
 @media (hover: hover) and (min-width: 900px) {
@@ -323,6 +337,7 @@ p { margin: 0 0 1em; }
 
 @media (prefers-reduced-motion: reduce) {
   .coin { animation: none; }
-  .reveal { transform: none; }
+  .reveal { filter: none; opacity: 1; transition: none; }
+  .hero .container > *, .scene-canvas { animation: none; }
   .scroll-cue::after { animation: none; }
 }
