@@ -277,7 +277,7 @@ p { margin: 0 0 1em; }
 
 /* =========== 3D layer =========== */
 .scene-canvas { position: absolute; inset: 0; z-index: -2; display: block; }
-.hero.has-3d { background-image: none !important; background: radial-gradient(ellipse at 50% 120%, #2a0503 0%, #0a0a0c 55%, #050506 100%); }
+.hero.has-3d { overflow: hidden; background-image: none !important; background: radial-gradient(ellipse at 50% 120%, #2a0503 0%, #0a0a0c 55%, #050506 100%); }
 .hero.has-3d::before { background:
   radial-gradient(ellipse 70% 55% at 50% 45%, rgba(5,5,6,.55) 0%, rgba(5,5,6,.15) 60%, transparent 80%),
   linear-gradient(180deg, rgba(5,5,6,.65) 0%, transparent 22%, transparent 70%, rgba(11,11,13,1) 100%); }
@@ -310,8 +310,8 @@ p { margin: 0 0 1em; }
 
 /* 3D reveal */
 /* Slow blur-in reveal */
-.reveal { opacity: 0; filter: blur(22px); transform: none; transition: opacity 2s ease, filter 2.2s cubic-bezier(.25,.6,.25,1); }
-.reveal.visible { opacity: 1; filter: blur(0); }
+.reveal { opacity: 0; filter: blur(22px); scale: .9; transition: opacity 2s ease, filter 2.2s cubic-bezier(.25,.6,.25,1), scale 2.4s cubic-bezier(.2,.65,.2,1); }
+.reveal.visible { opacity: 1; filter: blur(0); scale: 1; }
 .reveal:nth-child(2) { transition-delay: .2s; }
 .reveal:nth-child(3) { transition-delay: .4s; }
 .reveal:nth-child(4) { transition-delay: .6s; }
@@ -323,8 +323,9 @@ p { margin: 0 0 1em; }
 .hero .container > :nth-child(3) { animation-delay: .7s; }
 .hero .container > :nth-child(4) { animation-delay: 1.05s; }
 .hero .container > :nth-child(5) { animation-delay: 1.4s; }
-@keyframes blurIn { from { opacity: 0; filter: blur(24px); } to { opacity: 1; filter: blur(0); } }
-.scene-canvas { animation: blurIn 3s ease both; }
+@keyframes blurIn { from { opacity: 0; filter: blur(24px); scale: .88; } to { opacity: 1; filter: blur(0); scale: 1; } }
+@keyframes sceneIn { from { opacity: 0; filter: blur(24px); scale: 1.12; } to { opacity: 1; filter: blur(0); scale: 1; } }
+.scene-canvas { animation: sceneIn 3.2s cubic-bezier(.2,.65,.2,1) both; }
 
 /* Deep parallax photo bands */
 @media (hover: hover) and (min-width: 900px) {
@@ -337,7 +338,7 @@ p { margin: 0 0 1em; }
 
 @media (prefers-reduced-motion: reduce) {
   .coin { animation: none; }
-  .reveal { filter: none; opacity: 1; transition: none; }
+  .reveal { filter: none; opacity: 1; scale: 1; transition: none; }
   .hero .container > *, .scene-canvas { animation: none; }
   .scroll-cue::after { animation: none; }
 }
