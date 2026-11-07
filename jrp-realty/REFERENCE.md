@@ -6,7 +6,7 @@
 - Office: 1392 Mitchell Rd, Modesto, CA 95351
 - Business: real estate syndication. JRP is the General Partner (finds, buys, manages); investors are passive Limited Partners.
 - Pitch: for investors unhappy with savings/bond returns or stock-market swings. Promises: hands-off, stable income backed by leases, returns + tax benefits.
-- Headline on old site: "Unlocking Tomorrow's Wealth"
+- Headline on old site: "Unlocking Tomorrow's Wealth". New site headline (chosen by user): "Invest in What LASTS" (LASTS in red)
 - Brand: logo = red "JRP" + "INVESTMENT GROUP" (images/logo.png, logo-white.png). Old site colors: red #E80101, dark teal, deep blue; font Poppins.
 - Alt email seen on EB-5 page: ramansingh@jrprealtygrp.com
 - Portfolio (from detail pages):
