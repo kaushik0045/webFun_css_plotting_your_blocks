@@ -310,27 +310,24 @@ p { margin: 0 0 1em; }
 
 /* 3D reveal */
 /* Slow blur-in reveal */
-.reveal { opacity: 0; filter: blur(22px); scale: .9; transition: opacity 2s ease, filter 2.2s cubic-bezier(.25,.6,.25,1), scale 2.4s cubic-bezier(.2,.65,.2,1); }
-.reveal.visible { opacity: 1; filter: blur(0); scale: 1; }
-.reveal:nth-child(2) { transition-delay: .2s; }
-.reveal:nth-child(3) { transition-delay: .4s; }
-.reveal:nth-child(4) { transition-delay: .6s; }
-.reveal:nth-child(5) { transition-delay: .8s; }
-.reveal:nth-child(6) { transition-delay: 1s; }
+.reveal { opacity: 0; filter: blur(8px); scale: .96; transition: opacity .7s ease-out, filter .7s ease-out, scale .8s cubic-bezier(.2,.65,.2,1); }
+.reveal.visible { opacity: 1; filter: none; scale: 1; }
+.reveal:nth-child(2) { transition-delay: .07s; }
+.reveal:nth-child(3) { transition-delay: .14s; }
+.reveal:nth-child(4) { transition-delay: .21s; }
+.reveal:nth-child(5) { transition-delay: .28s; }
+.reveal:nth-child(6) { transition-delay: .35s; }
 /* Hero text blurs in on load */
-.hero .container > * { animation: blurIn 2.4s cubic-bezier(.25,.6,.25,1) both; }
-.hero .container > :nth-child(2) { animation-delay: .35s; }
-.hero .container > :nth-child(3) { animation-delay: .7s; }
-.hero .container > :nth-child(4) { animation-delay: 1.05s; }
-.hero .container > :nth-child(5) { animation-delay: 1.4s; }
-@keyframes blurIn { from { opacity: 0; filter: blur(24px); scale: .88; } to { opacity: 1; filter: blur(0); scale: 1; } }
-@keyframes sceneIn { from { opacity: 0; filter: blur(24px); scale: 1.12; } to { opacity: 1; filter: blur(0); scale: 1; } }
-.scene-canvas { animation: sceneIn 3.2s cubic-bezier(.2,.65,.2,1) both; }
+.hero .container > * { animation: blurIn .8s cubic-bezier(.2,.65,.2,1) both; }
+.hero .container > :nth-child(2) { animation-delay: .1s; }
+.hero .container > :nth-child(3) { animation-delay: .2s; }
+.hero .container > :nth-child(4) { animation-delay: .3s; }
+.hero .container > :nth-child(5) { animation-delay: .4s; }
+@keyframes blurIn { from { opacity: 0; filter: blur(10px); scale: .95; } to { opacity: 1; filter: blur(0); scale: 1; } }
+@keyframes sceneIn { from { opacity: 0; filter: blur(10px); scale: 1.06; } to { opacity: 1; filter: blur(0); scale: 1; } }
+.scene-canvas { animation: sceneIn 1.2s cubic-bezier(.2,.65,.2,1) both; }
 
 /* Deep parallax photo bands */
-@media (hover: hover) and (min-width: 900px) {
-  .photo-band, .team-band, .contact-band { background-attachment: fixed; }
-}
 .photo-band .panel { transform-style: preserve-3d; }
 
 /* Stats: big extruded numbers */
