@@ -1,5 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="#14284b"/>
-  <path d="M256 92 L420 216 V408 H92 V216 Z" fill="none" stroke="#d1a94f" stroke-width="28" stroke-linejoin="round"/>
-  <text x="256" y="372" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="150" font-weight="700" fill="#f3f1ea">JRP</text>
+  <rect width="512" height="512" rx="96" fill="#0b0b0d"/>
+  <circle cx="256" cy="256" r="186" fill="#000" stroke="#e10600" stroke-width="20"/>
+  <circle cx="256" cy="256" r="214" fill="none" stroke="#e10600" stroke-opacity=".18" stroke-width="22"/>
+  <text x="256" y="300" text-anchor="middle" font-family="'Space Grotesk', Arial, sans-serif" font-size="132" font-weight="700" fill="#fff" letter-spacing="2"><tspan fill="#e10600">J</tspan>RP</text>
 </svg>

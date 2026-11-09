@@ -22,7 +22,7 @@ function fmtAgo(iso) {
   if (s < 60) return 'just now';
   if (s < 3600) return `${Math.floor(s / 60)} min ago`;
   if (s < 86400) return `${Math.floor(s / 3600)} hr ago`;
-  if (s < 86400 * 7) return `${Math.floor(s / 86400)} days ago`;
+  if (s < 86400 * 7) { const d = Math.floor(s / 86400); return d === 1 ? 'yesterday' : `${d} days ago`; }
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 function fmtSize(n) {
@@ -102,9 +102,10 @@ function viewLogin() {
   $app.innerHTML = `
     <div class="login-wrap">
       <div class="card login-card">
-        <img src="/icons/icon.svg" width="64" height="64" alt="">
-        <h1>JRP Client Book</h1>
-        <p class="muted small">Employees only. Log in with your work email.</p>
+        <div class="emblem" aria-hidden="true"><span><b>J</b>RP</span></div>
+        <img class="logo" src="/img/logo-white.png" alt="JRP Investment Group" width="144" height="28">
+        <p class="kicker">Client Book · Employees only</p>
+        <p class="muted small">Log in with your work email.</p>
         <form id="login-form" autocomplete="on">
           <div class="field"><label for="email">Email</label>
             <input id="email" name="email" type="email" autocomplete="username" required autofocus></div>
@@ -133,16 +134,17 @@ const searchState = { q: '', filter: 'all' };
 function viewSearch() {
   setNav('search');
   $app.innerHTML = `
-    <h1>Hi ${esc(me.name.split(' ')[0])} 👋</h1>
+    <p class="kicker">Client Book</p>
+    <h1>Hi, ${esc(me.name.split(' ')[0])}</h1>
     <div class="searchbar">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-      <input id="q" type="search" placeholder="Search name, phone, email or address" autocomplete="off" value="${esc(searchState.q)}" aria-label="Search clients">
+      <input id="q" type="search" placeholder="Name, phone, email or address" autocomplete="off" value="${esc(searchState.q)}" aria-label="Search clients">
     </div>
     <div class="chips" role="group" aria-label="Filter">
       ${[['all', 'All'], ['buyer', 'Buyers'], ['seller', 'Sellers'], ['mine', 'My clients']]
         .map(([k, l]) => `<button class="chip ${searchState.filter === k ? 'on' : ''}" data-f="${k}">${l}</button>`).join('')}
     </div>
-    <div class="spread small muted" style="margin-bottom:8px"><span id="count"></span><a class="btn gold small" href="#/new">+ New buyer / seller</a></div>
+    <div class="spread small muted" style="margin-bottom:8px"><span id="count"></span><a class="btn small" href="#/new">+ New buyer / seller</a></div>
     <ul class="results" id="results"><li class="empty">Loading…</li></ul>`;
 
   let timer;
@@ -176,7 +178,7 @@ async function runSearch() {
     <li><a class="result" href="#/client/${r.id}">
       <div class="spread"><span class="name">${esc(r.name)}</span>${badge(r.type)}</div>
       <div class="meta">${[r.phone, r.email].filter(Boolean).map(esc).join(' · ') || 'No contact info'}</div>
-      ${r.first_property ? `<div class="meta">📍 ${esc(r.first_property)}${r.property_count > 1 ? ` +${r.property_count - 1} more` : ''}</div>` : ''}
+      ${r.first_property ? `<div class="meta">${esc(r.first_property)}${r.property_count > 1 ? ` +${r.property_count - 1} more` : ''}</div>` : ''}
       <div class="meta small">${r.agent_name ? `Agent: ${esc(r.agent_name)} · ` : ''}Updated ${esc(fmtAgo(r.updated_at))}</div>
     </a></li>`).join('')
     : `<li class="empty">No matches. <a href="#/new">Add a new buyer or seller</a></li>`;
@@ -196,7 +198,7 @@ async function viewClient(id) {
   ].sort((a, b) => (a.t < b.t ? 1 : -1));
 
   $app.innerHTML = `
-    <a href="#/" class="small">← Back to search</a>
+    <a href="#/" class="back">← Back to search</a>
     <div class="card client-head" style="margin-top:8px">
       <div class="spread">
         <div>
@@ -206,9 +208,9 @@ async function viewClient(id) {
         <a class="btn ghost small" href="#/client/${c.id}/edit">Edit</a>
       </div>
       <div class="quick">
-        ${c.phone ? `<a class="btn small" href="${esc(telUrl(c.phone))}">📞 Call</a>` : '<span></span>'}
-        ${c.phone ? `<a class="btn small ghost" href="sms:${esc(c.phone.replace(/[^\d+]/g, ''))}">💬 Text</a>` : '<span></span>'}
-        ${c.email ? `<a class="btn small ghost" href="mailto:${esc(c.email)}">✉️ Email</a>` : '<span></span>'}
+        ${c.phone ? `<a class="btn small" href="${esc(telUrl(c.phone))}">Call</a>` : '<span></span>'}
+        ${c.phone ? `<a class="btn small ghost" href="sms:${esc(c.phone.replace(/[^\d+]/g, ''))}">Text</a>` : '<span></span>'}
+        ${c.email ? `<a class="btn small ghost" href="mailto:${esc(c.email)}">Email</a>` : '<span></span>'}
       </div>
     </div>
 
@@ -224,7 +226,7 @@ async function viewClient(id) {
 
     <div class="card">
       <div class="spread"><h2>Properties / sites (${c.properties.length})</h2>
-        <button class="btn small gold" id="add-prop">+ Add</button></div>
+        <button class="btn small" id="add-prop">+ Add</button></div>
       <form id="prop-form" hidden style="margin:10px 0">
         <div class="field"><label for="p-addr">Address</label><input id="p-addr" required maxlength="300" placeholder="123 Main St, Modesto, CA"></div>
         <div class="field"><label for="p-notes">Notes (optional)</label><input id="p-notes" maxlength="1000" placeholder="e.g. 3 bed / 2 bath, listing price, lot size"></div>
@@ -233,7 +235,7 @@ async function viewClient(id) {
       ${c.properties.length ? c.properties.map((p) => `
         <div class="prop" data-id="${p.id}">
           <div class="spread">
-            <span class="addr">📍 ${esc(p.address)}</span>
+            <span class="addr">${esc(p.address)}</span>
             <span class="row">
               <a class="btn small ghost" href="${esc(mapsUrl(p.address))}" target="_blank" rel="noopener">Map</a>
               <button class="btn small ghost" data-edit-prop="${p.id}">Edit</button>
@@ -390,7 +392,7 @@ async function viewClientForm(id) {
   const c = id ? await api('GET', `/api/clients/${id}`) : { type: 'buyer', assigned_agent_id: me.id };
   const list = await agents();
   $app.innerHTML = `
-    <a href="${id ? `#/client/${id}` : '#/'}" class="small">← Cancel</a>
+    <a href="${id ? `#/client/${id}` : '#/'}" class="back">← Cancel</a>
     <div class="card" style="margin-top:8px">
       <h1>${id ? `Edit ${esc(c.name)}` : 'New buyer / seller'}</h1>
       <form id="client-form">
@@ -415,7 +417,7 @@ async function viewClientForm(id) {
         <div class="field"><label for="f-first">First comment (optional)</label>
           <textarea id="f-first" maxlength="5000" placeholder="How did they reach us? What are they looking for?"></textarea></div>`}
         <p class="error" id="form-err"></p>
-        <button class="btn gold block" type="submit">${id ? 'Save changes' : 'Save'}</button>
+        <button class="btn block" type="submit">${id ? 'Save changes' : 'Save'}</button>
       </form>
     </div>`;
 
@@ -464,7 +466,7 @@ async function viewAdmin() {
   if (me.role !== 'admin') { $app.innerHTML = '<div class="empty">Admins only.</div>'; return; }
   const users = await api('GET', '/api/admin/users');
   $app.innerHTML = `
-    <div class="spread"><h1>Team logins</h1><button class="btn gold small" id="add-user">+ Add employee</button></div>
+    <div class="spread"><h1>Team logins</h1><button class="btn small" id="add-user">+ Add employee</button></div>
     <p class="muted small">${users.filter((u) => u.active).length} active employees. Turning someone off logs them out right away and keeps their comment history.</p>
     <div class="card">
       <table class="table">
