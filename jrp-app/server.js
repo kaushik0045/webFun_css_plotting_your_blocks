@@ -179,13 +179,18 @@ app.get('/api/clients', requireAuth, (req, res) => {
   }
   if (type) { where.push("(c.type = @type OR c.type = 'both')"); params.type = type; }
   if (mine) { where.push('c.assigned_agent_id = @me'); params.me = req.user.id; }
+  if (req.query.agent === 'none') where.push('c.assigned_agent_id IS NULL');
+  else if (/^\d+$/.test(req.query.agent || '')) { where.push('c.assigned_agent_id = @agent'); params.agent = Number(req.query.agent); }
   const sql = `
     SELECT c.id, c.type, c.name, c.phone, c.email, c.updated_at,
            u.name AS agent_name,
            (SELECT address FROM properties p WHERE p.client_id = c.id ORDER BY p.id LIMIT 1) AS first_property,
            (SELECT COUNT(*) FROM properties p WHERE p.client_id = c.id) AS property_count,
-           (SELECT MAX(created_at) FROM comments m WHERE m.client_id = c.id) AS last_comment_at
-    FROM clients c LEFT JOIN users u ON u.id = c.assigned_agent_id
+           lc.created_at AS last_comment_at, lc.body AS last_comment, lu.name AS last_comment_by
+    FROM clients c
+    LEFT JOIN users u ON u.id = c.assigned_agent_id
+    LEFT JOIN comments lc ON lc.id = (SELECT m.id FROM comments m WHERE m.client_id = c.id ORDER BY m.created_at DESC, m.id DESC LIMIT 1)
+    LEFT JOIN users lu ON lu.id = lc.user_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY ${q ? 'c.name' : 'c.updated_at DESC'}
     LIMIT 100`;

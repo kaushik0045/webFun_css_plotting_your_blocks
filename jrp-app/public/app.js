@@ -132,9 +132,11 @@ function viewLogin() {
 }
 
 // ---------- search (home) ----------
-const searchState = { q: '', filter: 'all' };
-function viewSearch() {
+// type: all | buyer | seller     agent: '' (everyone) | 'me' | 'none' (unassigned) | employee id
+const searchState = { q: '', type: 'all', agent: '' };
+async function viewSearch() {
   setNav('search');
+  const team = await agents();
   $app.innerHTML = `
     <p class="kicker">Client Book</p>
     <h1>Hi, ${esc(me.name.split(' ')[0])}</h1>
@@ -142,13 +144,25 @@ function viewSearch() {
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
       <input id="q" type="search" placeholder="Name, phone, email or address" autocomplete="off" value="${esc(searchState.q)}" aria-label="Search clients">
     </div>
-    <div class="chips" role="group" aria-label="Filter">
-      ${[['all', 'All'], ['buyer', 'Buyers'], ['seller', 'Sellers'], ['mine', 'My clients']]
-        .map(([k, l]) => `<button class="chip ${searchState.filter === k ? 'on' : ''}" data-f="${k}">${l}</button>`).join('')}
+    <div class="filters-row">
+      <div class="chips" role="group" aria-label="Buyer or seller">
+        ${[['all', 'All'], ['buyer', 'Buyers'], ['seller', 'Sellers']]
+          .map(([k, l]) => `<button class="chip ${searchState.type === k ? 'on' : ''}" data-t="${k}">${l}</button>`).join('')}
+      </div>
+      <label class="agent-filter">
+        <span>Agent</span>
+        <select id="agent-filter" aria-label="Filter by assigned agent">
+          <option value="">Everyone's clients</option>
+          <option value="me">My clients</option>
+          ${team.filter((a) => a.id !== me.id).map((a) => `<option value="${a.id}">${esc(a.name)}'s clients</option>`).join('')}
+          <option value="none">Unassigned</option>
+        </select>
+      </label>
     </div>
-    <div class="spread small muted" style="margin-bottom:8px"><span id="count"></span><a class="btn small" href="#/new">+ New buyer / seller</a></div>
+    <div class="spread small muted" style="margin:4px 0 10px"><span id="count"></span><a class="btn small" href="#/new">+ New buyer / seller</a></div>
     <ul class="results" id="results"><li class="empty">Loading…</li></ul>`;
 
+  $('#agent-filter').value = searchState.agent;
   let timer;
   const input = $('#q');
   input.addEventListener('input', () => {
@@ -156,12 +170,22 @@ function viewSearch() {
     clearTimeout(timer);
     timer = setTimeout(runSearch, 250);
   });
-  $$('.chip').forEach((c) => c.addEventListener('click', () => {
-    searchState.filter = c.dataset.f;
-    $$('.chip').forEach((x) => x.classList.toggle('on', x === c));
+  $$('.chip[data-t]').forEach((c) => c.addEventListener('click', () => {
+    searchState.type = c.dataset.t;
+    $$('.chip[data-t]').forEach((x) => x.classList.toggle('on', x === c));
     runSearch();
   }));
+  $('#agent-filter').addEventListener('change', (e) => { searchState.agent = e.target.value; runSearch(); });
   runSearch();
+}
+
+// "Last note" box used on search cards and at the top of a profile.
+function lastNoteHtml(body, by, at, extra = '') {
+  if (!body) return '<div class="last-note none">No notes yet</div>';
+  return `<div class="last-note">
+      <div class="ln-head"><span class="ln-label">Last note</span> <b>${esc(by || 'Former employee')}</b> · ${esc(fmtAgo(at))} ${extra}</div>
+      <div class="ln-body">${esc(body)}</div>
+    </div>`;
 }
 
 let searchSeq = 0;
@@ -169,19 +193,21 @@ async function runSearch() {
   const seq = ++searchSeq;
   const p = new URLSearchParams();
   if (searchState.q.trim()) p.set('q', searchState.q.trim());
-  if (searchState.filter === 'buyer' || searchState.filter === 'seller') p.set('type', searchState.filter);
-  if (searchState.filter === 'mine') p.set('mine', '1');
+  if (searchState.type !== 'all') p.set('type', searchState.type);
+  if (searchState.agent === 'me') p.set('mine', '1');
+  else if (searchState.agent) p.set('agent', searchState.agent);
   const rows = await api('GET', `/api/clients?${p}`);
   if (seq !== searchSeq || !$('#results')) return;
-  $('#count').textContent = searchState.q.trim()
+  $('#count').textContent = searchState.q.trim() || searchState.agent
     ? `${rows.length} result${rows.length === 1 ? '' : 's'}`
     : 'Recently updated';
   $('#results').innerHTML = rows.length ? rows.map((r) => `
     <li><a class="result" href="#/client/${r.id}">
       <div class="spread"><span class="name">${esc(r.name)}</span>${badge(r.type)}</div>
+      <div class="agent-line ${r.agent_name ? '' : 'none'}">${r.agent_name ? `Agent: ${esc(r.agent_name)}${r.agent_name === me.name ? ' (you)' : ''}` : 'Unassigned'}</div>
       <div class="meta">${[r.phone, r.email].filter(Boolean).map(esc).join(' · ') || 'No contact info'}</div>
       ${r.first_property ? `<div class="meta">${esc(r.first_property)}${r.property_count > 1 ? ` +${r.property_count - 1} more` : ''}</div>` : ''}
-      <div class="meta small">${r.agent_name ? `Agent: ${esc(r.agent_name)} · ` : ''}Updated ${esc(fmtAgo(r.updated_at))}</div>
+      ${lastNoteHtml(r.last_comment, r.last_comment_by, r.last_comment_at)}
     </a></li>`).join('')
     : `<li class="empty">No matches. <a href="#/new">Add a new buyer or seller</a></li>`;
 }
@@ -302,10 +328,16 @@ async function viewClient(id) {
       <div class="spread">
         <div>
           <h1>${esc(c.name)}</h1>
-          ${badge(c.type)} <span class="muted small">Agent: ${esc(c.agent_name || 'Unassigned')}</span>
+          ${badge(c.type)} <span class="agent-line inline ${c.agent_name ? '' : 'none'}">${c.agent_name ? `Agent: ${esc(c.agent_name)}${c.assigned_agent_id === me.id ? ' (you)' : ''}` : 'Unassigned'}</span>
         </div>
         <a class="btn ghost small" href="#/client/${c.id}/edit">Edit</a>
       </div>
+      ${(() => {
+        const m = c.comments[0];
+        if (!m) return lastNoteHtml(null);
+        const tag = m.property_id ? `<a class="prop-tag" href="#/property/${m.property_id}">${esc(m.property_address || 'Property')}</a>` : '';
+        return lastNoteHtml(m.body, m.author, m.created_at, tag);
+      })()}
       <div class="quick">
         ${c.phone ? `<a class="btn small" href="${esc(telUrl(c.phone))}">Call</a>` : '<span></span>'}
         ${c.phone ? `<a class="btn small ghost" href="sms:${esc(c.phone.replace(/[^\d+]/g, ''))}">Text</a>` : '<span></span>'}

@@ -157,6 +157,26 @@ test('comments save name, date and time automatically', async () => {
   assert.equal((await staff('POST', `/api/clients/${ids.maria}/comments`, { body: '   ' })).status, 400, 'empty comments refused');
 });
 
+test('everyone sees who a client is assigned to and the last note', async () => {
+  // Admin (not the assigned agent) looks at the list.
+  const rows = (await admin('GET', '/api/clients')).data;
+  const maria = rows.find((r) => r.id === ids.maria);
+  assert.equal(maria.agent_name, 'Priya Staff');
+  assert.equal(maria.last_comment, 'Called Maria about spring listing.');
+  assert.equal(maria.last_comment_by, 'Priya Staff');
+  assert.ok(maria.last_comment_at);
+  const james = rows.find((r) => r.id === ids.james);
+  assert.equal(james.agent_name, null);
+  assert.equal(james.last_comment, null);
+});
+
+test("filter by another employee's clients, or unassigned", async () => {
+  const names = async (qs) => (await admin('GET', `/api/clients?${qs}`)).data.map((c) => c.name);
+  assert.deepEqual(await names(`agent=${ids.staff}`), ['Maria Lopez']);
+  assert.deepEqual(await names('agent=none'), ['James Carter']);
+  assert.deepEqual(await names(`agent=${ids.staff}&type=buyer`), [], 'agent and type filters combine');
+});
+
 // ---------- property pages ----------
 test('property page shows owner and its own comments only', async () => {
   const c = (await staff('GET', `/api/clients/${ids.maria}`)).data;
