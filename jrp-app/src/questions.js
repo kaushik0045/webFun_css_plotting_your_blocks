@@ -32,8 +32,6 @@ const PROPERTY_TYPES = [
   'Other commercial',
 ];
 
-const TIMELINES = ['ASAP', '1–3 months', '3–6 months', '6–12 months', 'Just exploring'];
-
 // Only properties whose status is "For sale" are matched with buyers.
 const LISTING_STATUSES = ['For sale', 'Under contract', 'Sold', 'Not for sale'];
 
@@ -71,31 +69,53 @@ const SELLER_QUESTIONS = [
   { key: 'additional_info', label: 'Additional info', type: 'textarea' },
 ];
 
+// US states, so buyers can type "CA" or "California".
+const STATES = {
+  AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California', CO: 'Colorado', CT: 'Connecticut',
+  DE: 'Delaware', DC: 'District of Columbia', FL: 'Florida', GA: 'Georgia', HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois',
+  IN: 'Indiana', IA: 'Iowa', KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana', ME: 'Maine', MD: 'Maryland',
+  MA: 'Massachusetts', MI: 'Michigan', MN: 'Minnesota', MS: 'Mississippi', MO: 'Missouri', MT: 'Montana',
+  NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire', NJ: 'New Jersey', NM: 'New Mexico', NY: 'New York',
+  NC: 'North Carolina', ND: 'North Dakota', OH: 'Ohio', OK: 'Oklahoma', OR: 'Oregon', PA: 'Pennsylvania',
+  RI: 'Rhode Island', SC: 'South Carolina', SD: 'South Dakota', TN: 'Tennessee', TX: 'Texas', UT: 'Utah',
+  VT: 'Vermont', VA: 'Virginia', WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
+};
+
+// JRP's buyer questions (asked once per buyer).
 const BUYER_QUESTIONS = [
   { key: 'property_types', label: 'Property types wanted', type: 'multiselect', options: PROPERTY_TYPES,
     help: 'Leave all unticked if they are open to any type.' },
-  { key: 'budget_max', label: 'Maximum budget', type: 'money', help: 'The most they can spend.' },
-  { key: 'preferred_cities', label: 'Preferred cities', type: 'text', help: 'Separate with commas, e.g. Modesto, Turlock. Leave blank for anywhere.' },
-  { key: 'min_size_sqft', label: 'Minimum building size (sq ft)', type: 'number' },
-  { key: 'financing', label: 'How are they paying?', type: 'select', options: ['Cash', 'Pre-approved loan', 'Needs financing', 'Not sure'] },
-  { key: 'timeline', label: 'How soon do they want to buy?', type: 'select', options: TIMELINES },
-  { key: 'notes', label: 'Anything else they are looking for?', type: 'textarea' },
+  { key: 'brands', label: 'Brand interested in', type: 'multiselect', options: BRANDS,
+    help: 'Tick all that apply. Leave all unticked if any brand is fine.' },
+  { key: 'states', label: 'State interested in', type: 'text',
+    help: 'e.g. "CA" or "CA, NV" or "California". Leave blank for any state.' },
+  { key: 'branding', label: 'Branded or independent?', type: 'select', options: ['Branded', 'Independent', 'Either'] },
+  { key: 'cash_injection', label: 'Cash injection', type: 'money', help: 'Cash they can put down.' },
+  { key: 'budget_max', label: 'Funds (total buying power)', type: 'money', help: 'The most they can pay, including any loan. Used to compare with asking prices.' },
+  { key: 'exchange_1031', label: '1031 exchange?', type: 'yesno', help: 'If yes, they probably have a property to sell too.' },
+  { key: 'business_experience', label: 'Business experience?', type: 'yesno' },
+  { key: 'experience_where', label: 'If yes, where?', type: 'text', showIf: { key: 'business_experience', equals: 'yes' } },
+  { key: 'experience_years', label: 'How many years?', type: 'number', showIf: { key: 'business_experience', equals: 'yes' } },
+  { key: 'additional_info', label: 'Additional info', type: 'textarea' },
 ];
 
 // ----------------------------------------------------------------------------
 //  MATCH RULES — how a buyer is compared with a property for sale.
 //    kind 'price'    seller amount vs buyer's maximum budget
 //    kind 'oneOf'    seller's answer must be one of the buyer's choices (blank = any)
-//    kind 'place'    the property's address must contain one of the buyer's places
-//    kind 'atLeast'  seller's number must be at least the buyer's minimum
+//    kind 'state'    the property's address must be in one of the buyer's states
+//    kind 'branding' buyer wants Branded / Independent; seller brand "Unbranded" = independent
+//    kind 'place'    the property's address must contain one of the buyer's places (not used now)
+//    kind 'atLeast'  seller's number must be at least the buyer's minimum (not used now)
 //  weight = how much the rule counts toward the 0–100 score.
 //  dealBreaker = a miss caps the whole score at 30 ("Not a good match").
 // ----------------------------------------------------------------------------
 const MATCH_RULES = [
-  { key: 'price', label: 'Price vs budget', kind: 'price', seller: 'asking_price', buyer: 'budget_max', weight: 55, required: true },
-  { key: 'type', label: 'Property type', kind: 'oneOf', seller: 'property_type', buyer: 'property_types', weight: 25, dealBreaker: true },
-  { key: 'location', label: 'Location', kind: 'place', seller: 'address', buyer: 'preferred_cities', weight: 10 },
-  { key: 'size', label: 'Building size', kind: 'atLeast', seller: 'size_sqft', buyer: 'min_size_sqft', weight: 10, unit: 'sq ft' },
+  { key: 'price', label: 'Price vs funds', kind: 'price', seller: 'asking_price', buyer: 'budget_max', weight: 50, required: true },
+  { key: 'type', label: 'Property type', kind: 'oneOf', seller: 'property_type', buyer: 'property_types', weight: 20, dealBreaker: true },
+  { key: 'state', label: 'State', kind: 'state', seller: 'address', buyer: 'states', weight: 15, dealBreaker: true },
+  { key: 'brand', label: 'Brand', kind: 'oneOf', seller: 'brand', buyer: 'brands', weight: 10 },
+  { key: 'branding', label: 'Branded or independent', kind: 'branding', seller: 'brand', buyer: 'branding', weight: 5 },
 ];
 
 // Score bands for the match meter.
@@ -106,4 +126,4 @@ const LEVELS = [
   { level: 'poor', min: 0, label: 'Not a good match' },
 ];
 
-module.exports = { SELLER_QUESTIONS, BUYER_QUESTIONS, MATCH_RULES, LEVELS, PROPERTY_TYPES, LISTING_STATUSES, BRANDS };
+module.exports = { SELLER_QUESTIONS, BUYER_QUESTIONS, MATCH_RULES, LEVELS, PROPERTY_TYPES, LISTING_STATUSES, BRANDS, STATES };

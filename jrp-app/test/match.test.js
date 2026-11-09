@@ -35,7 +35,7 @@ test('calculator: difference, % of budget, and price drop needed', () => {
   assert.equal(price.calc.difference, 100000);
   assert.equal(price.calc.pctOfBudget, 10);
   assert.equal(Math.round(price.calc.sellerDropPct * 10) / 10, 9.1);
-  assert.match(price.text, /\$100,000 over budget/);
+  assert.match(price.text, /\$100,000 more than the buyer's funds/);
   assert.match(price.text, /10\.0% more/);
   assert.match(price.text, /9\.1%/);
 });
@@ -67,20 +67,42 @@ test('buyer open to any type is not penalised', () => {
   assert.equal(m.parts.find((p) => p.key === 'type').status, 'any');
 });
 
-test('location and size count when the buyer sets them', () => {
-  const far = compare(gasBuyer(1000000, { preferred_cities: 'Fresno' }), gasStation(1000000, { city: 'Modesto' }));
-  const near = compare(gasBuyer(1000000, { preferred_cities: 'fresno, modesto' }), gasStation(1000000, { city: 'Modesto' }));
-  assert.ok(near.score > far.score);
-  assert.equal(near.parts.find((p) => p.key === 'location').status, 'match');
-  const small = compare(gasBuyer(1000000, { min_size_sqft: 3000 }), gasStation(1000000, { size_sqft: 2800 }));
-  assert.equal(small.parts.find((p) => p.key === 'size').status, 'partial');
+test('state, brand and branded/independent count when the buyer sets them', () => {
+  const ca = '1 Fuel Way, Modesto, CA 95350';
+  const nvOnly = compare(gasBuyer(1000000, { states: 'NV' }), listing({ asking_price: 1000000, property_type: 'Gas station' }, ca));
+  assert.equal(nvOnly.level, 'poor', 'wrong state is a deal breaker');
+  assert.match(nvOnly.parts.find((p) => p.key === 'state').text, /California/);
+  const caOk = compare(gasBuyer(1000000, { states: 'california, nv' }), listing({ asking_price: 1000000, property_type: 'Gas station' }, ca));
+  assert.equal(caOk.parts.find((p) => p.key === 'state').status, 'match');
+  const brand = compare(gasBuyer(1000000, { brands: ['Shell'], branding: 'Independent' }), gasStation(1000000, { brand: 'Chevron' }));
+  assert.equal(brand.parts.find((p) => p.key === 'brand').status, 'miss');
+  assert.equal(brand.parts.find((p) => p.key === 'branding').status, 'miss');
+  assert.ok(brand.score < 100 && brand.level === 'good');
+  const indep = compare(gasBuyer(1000000, { branding: 'Independent' }), gasStation(1000000, { brand: 'Unbranded' }));
+  assert.equal(indep.parts.find((p) => p.key === 'branding').status, 'match');
+});
+
+test('cash injection appears in the price calculator', () => {
+  const m = compare(gasBuyer(900000, { cash_injection: 300000 }), gasStation(1000000));
+  assert.equal(m.parts[0].calc.cash, 300000);
+  assert.equal(m.parts[0].calc.cashPctOfAsking, 30);
+});
+
+test('JRP buyer questions: experience follow-ups only kept when experience is Yes', () => {
+  const no = cleanDetails(BUYER_QUESTIONS, { business_experience: 'no', experience_where: 'Fresno', experience_years: '5' });
+  assert.deepEqual(no, { business_experience: 'no' });
+  const yes = cleanDetails(BUYER_QUESTIONS, { business_experience: 'yes', experience_where: 'Fresno', experience_years: '5', exchange_1031: 'yes', branding: 'Branded' });
+  assert.deepEqual(yes, { business_experience: 'yes', experience_where: 'Fresno', experience_years: 5, exchange_1031: 'yes', branding: 'Branded' });
+  for (const key of ['brands', 'states', 'branding', 'cash_injection', 'budget_max', 'exchange_1031', 'business_experience', 'experience_where', 'experience_years']) {
+    assert.ok(BUYER_QUESTIONS.some((q) => q.key === key), `missing buyer question ${key}`);
+  }
 });
 
 test('missing price on either side = not enough info, with what to fill in', () => {
   const m = compare(gasBuyer(null), gasStation(1000000));
   assert.equal(m.level, 'incomplete');
   assert.equal(m.score, null);
-  assert.match(m.parts.find((p) => p.key === 'price').text, /buyer's budget/);
+  assert.match(m.parts.find((p) => p.key === 'price').text, /buyer's funds/);
 });
 
 test('form answers are cleaned: money text, unknown options and unknown questions', () => {

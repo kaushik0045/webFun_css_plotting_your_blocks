@@ -1,6 +1,6 @@
 // Matching engine: compares every buyer with every property for sale and
 // explains the result ("See why"). Rules and weights live in src/questions.js.
-const { SELLER_QUESTIONS, BUYER_QUESTIONS, MATCH_RULES, LEVELS } = require('./questions');
+const { SELLER_QUESTIONS, BUYER_QUESTIONS, MATCH_RULES, LEVELS, STATES } = require('./questions');
 
 const blank = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 const money = (n) => '$' + Math.round(n).toLocaleString('en-US');
@@ -50,6 +50,27 @@ function changedLabels(questions, before, after) {
   return questions.filter((q) => JSON.stringify(before[q.key] ?? null) !== JSON.stringify(after[q.key] ?? null)).map((q) => q.label);
 }
 
+// "CA, nevada" -> ['CA', 'NV']
+const NAME_TO_CODE = Object.fromEntries(Object.entries(STATES).map(([code, name]) => [name.toLowerCase(), code]));
+function statesOf(text) {
+  const out = [];
+  for (const raw of String(text || '').split(/[,;/]+|\s+and\s+/i)) {
+    const t = raw.trim();
+    const code = STATES[t.toUpperCase()] ? t.toUpperCase() : NAME_TO_CODE[t.toLowerCase()];
+    if (code && !out.includes(code)) out.push(code);
+  }
+  return out;
+}
+// Which state is an address in? Looks for ", CA" / " CA 95350" or the full state name.
+function stateOfAddress(address) {
+  const a = String(address || '');
+  for (const [code, name] of Object.entries(STATES)) {
+    if (new RegExp(`(^|[\\s,])${code}(\\s+\\d{5}|\\s*,|\\s*$)`).test(a)) return code;
+    if (new RegExp(`\\b${name}\\b`, 'i').test(a)) return code;
+  }
+  return null;
+}
+
 function placesOf(text) {
   return String(text || '').split(/[,;/]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
 }
@@ -63,28 +84,30 @@ function scoreRule(rule, listing, buyer) {
   if (rule.kind === 'price') {
     if (blank(s) || blank(b)) {
       const who = [blank(s) && "seller's asking price", blank(b) && "buyer's budget"].filter(Boolean).join(' and ');
-      return { ...base, status: 'missing', score: null, text: `Add the ${who} to compare price.` };
+      return { ...base, status: 'missing', score: null, text: `Add the ${who} to compare price.`.replace("buyer's budget", "buyer's funds") };
     }
     const asking = Number(s);
     const budget = Number(b);
     const diff = asking - budget;
+    const cash = blank(buyer.details.cash_injection) ? null : Number(buyer.details.cash_injection);
+    const cashInfo = cash === null ? {} : { cash, cashPctOfAsking: asking ? (cash / asking) * 100 : 0 };
     if (diff <= 0) {
       const left = -diff;
       const leftPct = budget ? (left / budget) * 100 : 0;
-      const calc = { asking, budget, difference: left, direction: 'under', pctOfBudget: leftPct };
-      if (left === 0) return { ...base, status: 'match', score: 100, calc, text: `Exact match: asking price equals the buyer's budget (${money(budget)}).` };
+      const calc = { asking, budget, difference: left, direction: 'under', pctOfBudget: leftPct, ...cashInfo };
+      if (left === 0) return { ...base, status: 'match', score: 100, calc, text: `Exact match: asking price equals the buyer's funds (${money(budget)}).` };
       if (asking < budget * 0.6) {
         return { ...base, status: 'partial', score: 75, calc,
-          text: `${money(left)} under budget (${pct(leftPct)} less). Much cheaper than they can spend, so it may be smaller than what they want.` };
+          text: `${money(left)} under their funds (${pct(leftPct)} less). Much cheaper than they can spend, so it may be smaller than what they want.` };
       }
-      return { ...base, status: 'match', score: 100, calc, text: `Within budget: ${money(left)} left over (${pct(leftPct)} under the budget).` };
+      return { ...base, status: 'match', score: 100, calc, text: `Within funds: ${money(left)} left over (${pct(leftPct)} under their funds).` };
     }
     const overPct = budget ? (diff / budget) * 100 : 100;
     const dropPct = (diff / asking) * 100;
     const score = Math.max(0, Math.round(100 - 5 * overPct));
     return { ...base, status: score >= 70 ? 'partial' : 'miss', score,
-      calc: { asking, budget, difference: diff, direction: 'over', pctOfBudget: overPct, sellerDropPct: dropPct },
-      text: `${money(diff)} over budget. The buyer would need ${pct(overPct)} more money, or the seller would need to lower the price by ${pct(dropPct)} to ${money(budget)}.` };
+      calc: { asking, budget, difference: diff, direction: 'over', pctOfBudget: overPct, sellerDropPct: dropPct, ...cashInfo },
+      text: `${money(diff)} more than the buyer's funds. The buyer would need ${pct(overPct)} more money, or the seller would need to lower the price by ${pct(dropPct)} to ${money(budget)}.` };
   }
 
   if (rule.kind === 'oneOf') {
@@ -94,6 +117,26 @@ function scoreRule(rule, listing, buyer) {
     return wanted.includes(s)
       ? { ...base, status: 'match', score: 100, text: `${s}: the buyer wants this (${wanted.join(', ')}).` }
       : { ...base, status: 'miss', score: 0, text: `This is a ${s}, but the buyer wants ${wanted.join(', ')}.` };
+  }
+
+  if (rule.kind === 'state') {
+    const wanted = statesOf(b);
+    if (!wanted.length) return { ...base, status: 'any', score: null, text: 'Buyer is open to any state.' };
+    const st = stateOfAddress(listing.address);
+    if (!st) return { ...base, status: 'missing', score: null, text: 'Add the state to this property\'s address (e.g. "Modesto, CA 95350").' };
+    return wanted.includes(st)
+      ? { ...base, status: 'match', score: 100, text: `In ${STATES[st]}, a state the buyer wants (${wanted.join(', ')}).` }
+      : { ...base, status: 'miss', score: 0, text: `This property is in ${STATES[st]}, but the buyer wants ${wanted.map((c) => STATES[c]).join(', ')}.` };
+  }
+
+  if (rule.kind === 'branding') {
+    if (blank(b) || b === 'Either') return { ...base, status: 'any', score: null, text: 'Buyer is fine with branded or independent.' };
+    if (blank(s)) return { ...base, status: 'missing', score: null, text: 'Add the brand for this property.' };
+    const isIndependent = s === 'Unbranded';
+    const ok = (b === 'Independent') === isIndependent;
+    return ok
+      ? { ...base, status: 'match', score: 100, text: `${isIndependent ? 'Independent (unbranded)' : `Branded (${s})`}, as the buyer wants.` }
+      : { ...base, status: 'miss', score: 0, text: `Buyer wants ${b.toLowerCase()}, but this station is ${isIndependent ? 'independent (unbranded)' : `branded (${s})`}.` };
   }
 
   if (rule.kind === 'place') {
@@ -176,14 +219,17 @@ const sortMatches = (a, b) => (ORDER[a.level] - ORDER[b.level]) || ((b.score ?? 
 
 function buyerSummary(b) {
   return { id: b.id, name: b.name, agent_name: b.agent_name, assigned_agent_id: b.assigned_agent_id,
-    budget: b.details.budget_max ?? null, types: b.details.property_types || [] };
+    budget: b.details.budget_max ?? null, cash: b.details.cash_injection ?? null, types: b.details.property_types || [],
+    brands: b.details.brands || [], states: b.details.states || null, exchange_1031: b.details.exchange_1031 === 'yes' };
 }
 function listingSummary(l) {
   return { id: l.id, address: l.address, client_id: l.client_id, client_name: l.client_name, agent_name: l.agent_name,
-    assigned_agent_id: l.assigned_agent_id, asking: l.details.asking_price ?? null, type: l.details.property_type || null };
+    assigned_agent_id: l.assigned_agent_id, asking: l.details.asking_price ?? null, type: l.details.property_type || null,
+    brand: l.details.brand || null };
 }
 
 module.exports = {
+  statesOf, stateOfAddress,
   SELLER_QUESTIONS, BUYER_QUESTIONS, parseDetails, cleanDetails, changedLabels, compare,
   loadBuyers, loadListings, sortMatches, buyerSummary, listingSummary, isForSale,
 };

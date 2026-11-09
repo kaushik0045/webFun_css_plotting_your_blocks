@@ -410,9 +410,10 @@ function whyHtml(m) {
     calc = `<div class="calc">
         <p class="calc-title">Price calculator</p>
         <div class="calc-row"><span>Seller is asking</span><b>${fmtMoney(c.asking)}</b></div>
-        <div class="calc-row"><span>Buyer can spend up to</span><b>${fmtMoney(c.budget)}</b></div>
-        <div class="calc-row total ${c.direction}"><span>${c.direction === 'over' ? 'Over budget by' : c.difference === 0 ? 'Difference' : 'Under budget by'}</span>
-          <b>${fmtMoney(c.difference)} <small>(${c.pctOfBudget.toFixed(1)}% of budget)</small></b></div>
+        <div class="calc-row"><span>Buyer's funds (total)</span><b>${fmtMoney(c.budget)}</b></div>
+        ${c.cash !== undefined ? `<div class="calc-row"><span>Buyer's cash injection</span><b>${fmtMoney(c.cash)} <small>(${c.cashPctOfAsking.toFixed(1)}% of asking)</small></b></div>` : ''}
+        <div class="calc-row total ${c.direction}"><span>${c.direction === 'over' ? 'Short of asking by' : c.difference === 0 ? 'Difference' : 'Left over after buying'}</span>
+          <b>${fmtMoney(c.difference)} <small>(${c.pctOfBudget.toFixed(1)}% of funds)</small></b></div>
         ${c.direction === 'over' ? `
         <div class="calc-row"><span>To close the gap, the buyer adds</span><b>${fmtMoney(c.difference)}</b></div>
         <div class="calc-row"><span>…or the seller lowers the price by</span><b>${c.sellerDropPct.toFixed(1)}%</b></div>` : ''}
@@ -438,11 +439,12 @@ function matchItem(m, mode) {
   const B = m.buyer;
   const listingHtml = L ? `
       <a href="#/property/${L.id}" class="mi-title">${esc(L.address)}</a>
-      <div class="meta small">${[L.type, L.asking !== null ? `Asking ${fmtMoney(L.asking)}` : null].filter(Boolean).map(esc).join(' · ') || 'No listing details yet'}</div>
+      <div class="meta small">${[L.type, L.brand, L.asking !== null ? `Asking ${fmtMoney(L.asking)}` : null].filter(Boolean).map(esc).join(' · ') || 'No listing details yet'}</div>
       <div class="meta small">Seller <a href="#/client/${L.client_id}">${esc(L.client_name)}</a> · Agent: ${esc(L.agent_name || 'Unassigned')}</div>` : '';
   const buyerHtml = B ? `
       <a href="#/client/${B.id}" class="mi-title">${esc(B.name)}</a>
-      <div class="meta small">${[B.budget !== null ? `Budget ${fmtMoney(B.budget)}` : null, B.types.length ? B.types.join(', ') : null].filter(Boolean).map(esc).join(' · ') || 'No buyer answers yet'}</div>
+      <div class="meta small">${[B.budget !== null ? `Funds ${fmtMoney(B.budget)}` : null, B.cash !== null ? `Cash ${fmtMoney(B.cash)}` : null,
+        B.brands.length ? B.brands.join('/') : null, B.states, B.exchange_1031 ? '1031' : null].filter(Boolean).map(esc).join(' · ') || 'No buyer answers yet'}</div>
       <div class="meta small">Buyer's agent: ${esc(B.agent_name || 'Unassigned')}</div>` : '';
   const head = mode === 'listing' ? listingHtml : mode === 'buyer' ? buyerHtml
     : `<div class="pair"><div><span class="pair-k">Buyer</span>${buyerHtml}</div><div><span class="pair-k">Property</span>${listingHtml}</div></div>`;
@@ -515,6 +517,12 @@ async function viewMatches() {
   $('#only-mine').addEventListener('change', (e) => { matchState.mine = e.target.checked; viewMatches(); });
 }
 
+// "Not now" on the 1031 prompt is remembered on this device only.
+const dismissKey = (id) => `jrp-1031-dismissed-${id}`;
+function dismissed1031(id) { try { return localStorage.getItem(dismissKey(id)) === '1'; } catch { return false; } }
+function dismiss1031(id) { try { localStorage.setItem(dismissKey(id), '1'); } catch { /* ignore */ } }
+function undismiss1031(id) { try { localStorage.removeItem(dismissKey(id)); } catch { /* ignore */ } }
+
 // ---------- person profile (buyer / seller) ----------
 let lastClientId = null;
 async function viewClient(id) {
@@ -562,6 +570,18 @@ async function viewClient(id) {
         ${c.email ? `<a class="btn small ghost" href="mailto:${esc(c.email)}">Email</a>` : '<span></span>'}
       </div>
     </div>
+
+    ${c.type === 'buyer' && c.details.exchange_1031 === 'yes' && !dismissed1031(c.id) ? `
+    <div class="card prompt-1031" id="prompt-1031">
+      <p class="kicker">1031 exchange</p>
+      <h2>${esc(c.name)} is doing a 1031 exchange</h2>
+      <p>That usually means they are selling a property too, so they are a potential seller as well as a buyer.
+        Make them a <b>Buyer &amp; Seller</b> so you can add the property they are selling and match it with buyers?</p>
+      <div class="row">
+        <button class="btn small" id="make-both">Yes, make Buyer &amp; Seller</button>
+        <button class="btn small ghost" id="not-now-1031">Not now</button>
+      </div>
+    </div>` : ''}
 
     ${isBuyer ? `
     <div class="card" id="buyer-card">
@@ -614,6 +634,19 @@ async function viewClient(id) {
   `;
 
   bindLog(`/api/clients/${id}`, () => viewClient(id));
+  const mb = $('#make-both');
+  if (mb) {
+    mb.addEventListener('click', async () => {
+      try {
+        await api('PATCH', `/api/clients/${id}`, { type: 'both' });
+        toast('Now a Buyer & Seller. Add the property they are selling.');
+        await viewClient(id);
+        const add = $('#add-prop');
+        if (add) { add.click(); add.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+      } catch (err) { toast(err.message, true); }
+    });
+    $('#not-now-1031').addEventListener('click', () => { dismiss1031(id); $('#prompt-1031').remove(); });
+  }
   if (isBuyer) {
     bindMatchesCard(mres.matches, 'listing');
     const bf = $('#buyer-form');
@@ -622,8 +655,13 @@ async function viewClient(id) {
     bf.addEventListener('submit', async (e) => {
       e.preventDefault();
       try {
-        await api('PATCH', `/api/clients/${id}`, { details: readQuestionFields(Q.buyer, 'bq') });
-        toast('Answers saved'); viewClient(id);
+        const answers = readQuestionFields(Q.buyer, 'bq');
+        await api('PATCH', `/api/clients/${id}`, { details: answers });
+        toast('Answers saved');
+        if (answers.exchange_1031 === 'yes') undismiss1031(id);
+        await viewClient(id);
+        const pr = $('#prompt-1031');
+        if (pr) pr.scrollIntoView({ behavior: 'smooth', block: 'center' });
       } catch (err) { toast(err.message, true); }
     });
   }
@@ -822,6 +860,10 @@ async function viewClientForm(id) {
         toast('Saved'); go(`#/client/${id}`);
       } else {
         body.properties = $$('.p-in').map((i) => ({ address: i.value })).filter((p) => p.address.trim());
+        if (type === 'buyer' && body.details && body.details.exchange_1031 === 'yes'
+          && confirm('This buyer is doing a 1031 exchange, so they are probably selling a property too.\n\nSave them as a Buyer & Seller instead?')) {
+          body.type = 'both';
+        }
         const r = await api('POST', '/api/clients', body);
         const first = $('#f-first').value.trim();
         if (first) await api('POST', `/api/clients/${r.id}/comments`, { body: first });

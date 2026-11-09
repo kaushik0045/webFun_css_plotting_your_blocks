@@ -351,3 +351,8 @@ h2 .count {
 .match-counts.tight { margin-top: 4px; }
 .mc { font: 700 .64rem/1 var(--head); letter-spacing: .1em; text-transform: uppercase; padding: 5px 7px; color: #0b0b0d; background: var(--lvl); }
 .lvl-chip.on { background: var(--lvl, var(--red)); border-color: var(--lvl, var(--red)); color: #0b0b0d; }
+
+/* ---------- 1031 prompt ---------- */
+.prompt-1031 { border: 2px solid var(--red); background: linear-gradient(180deg, rgba(225, 6, 0, .14), var(--ink)); }
+.prompt-1031 h2 { font-size: 1.05rem; }
+.prompt-1031 p { color: #dcdce0; }
