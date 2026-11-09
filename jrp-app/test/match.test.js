@@ -226,3 +226,25 @@ test("JRP seller questions: follow-up 'how much' only kept when rental income is
     assert.ok(SELLER_QUESTIONS.some((q) => q.key === key), `missing seller question ${key}`);
   }
 });
+
+test('empty app: login explains that no logins exist yet', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jrp-empty-'));
+  const port = PORT + 1;
+  const srv = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'server.js'], {
+    cwd: ROOT, stdio: 'ignore', env: { ...process.env, PORT: String(port), DATA_DIR: dir, NODE_ENV: 'test', ADMIN_EMAIL: '', ADMIN_PASSWORD: '' },
+  });
+  try {
+    for (let i = 0; i < 50; i++) {
+      try { if ((await fetch(`http://127.0.0.1:${port}/healthz`)).ok) break; } catch { /* starting */ }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    const res = await fetch(`http://127.0.0.1:${port}/api/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-JRP': '1' }, body: JSON.stringify({ email: 'admin@demo.com', password: 'demo1234' }),
+    });
+    assert.equal(res.status, 401);
+    assert.match((await res.json()).error, /No employee logins exist/);
+  } finally {
+    srv.kill();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

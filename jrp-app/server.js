@@ -95,6 +95,9 @@ app.post('/api/login', (req, res) => {
   const a = attempts.get(key) || { n: 0, until: 0 };
   if (a.until > Date.now()) return fail(res, 429, 'Too many attempts. Try again in 15 minutes.');
 
+  if (db.prepare('SELECT COUNT(*) AS n FROM users').get().n === 0) {
+    return fail(res, 401, 'No employee logins exist in this copy of the app yet. In Terminal run "npm run demo-data" (sample data) or "npm run create-admin".');
+  }
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
   if (!user || !user.active || !bcrypt.compareSync(password, user.password_hash)) {
     a.n += 1;
@@ -509,4 +512,20 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
   fail(res, 500, 'Something went wrong');
 });
 
-app.listen(PORT, () => console.log(`JRP Client Book running on http://localhost:${PORT}`));
+// Start the server. If the port is taken (usually another copy of this app still
+// running in another Terminal window), say so clearly instead of pretending to start.
+function startupFailed(err) {
+  if (err && err.code === 'EADDRINUSE') {
+    console.error(`\n*** Could not start: port ${PORT} is already in use. ***`);
+    console.error('Another copy of JRP Client Book (or another app) is probably still running.');
+    console.error('Close every other Terminal window (or press Control + C in it), then run "npm run dev" again.\n');
+  } else {
+    console.error('Could not start the server:', err);
+  }
+  process.exit(1);
+}
+const server = app.listen(PORT, (err) => {
+  if (err) return startupFailed(err);
+  console.log(`JRP Client Book running on http://localhost:${PORT}`);
+});
+server.on('error', startupFailed);

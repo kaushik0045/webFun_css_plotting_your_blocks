@@ -57,6 +57,19 @@ after(() => {
 });
 
 // ---------- login & security ----------
+test('server explains when port 3000 is already taken', async () => {
+  const second = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'server.js'], {
+    cwd: ROOT, env: { ...process.env, PORT: String(PORT), DATA_DIR, NODE_ENV: 'test' }, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let out = '';
+  second.stdout.on('data', (d) => { out += d; });
+  second.stderr.on('data', (d) => { out += d; });
+  const code = await new Promise((r) => second.on('exit', r));
+  assert.equal(code, 1);
+  assert.match(out, /already in use/);
+  assert.doesNotMatch(out, /running on/);
+});
+
 test('pages need a login', async () => {
   assert.equal((await anon('GET', '/api/clients')).status, 401);
   assert.equal((await anon('GET', '/api/me')).status, 401);
