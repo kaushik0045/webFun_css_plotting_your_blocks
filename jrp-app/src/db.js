@@ -1,0 +1,97 @@
+// Database setup: one SQLite file holds every table.
+// DATA_DIR is where the database and uploaded files live (a persistent disk in production).
+const path = require('path');
+const fs = require('fs');
+const Database = require('better-sqlite3');
+
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
+const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+const db = new Database(path.join(DATA_DIR, 'jrp.db'));
+db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS users (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  name          TEXT NOT NULL,
+  email         TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  password_hash TEXT NOT NULL,
+  role          TEXT NOT NULL CHECK (role IN ('admin','staff')) DEFAULT 'staff',
+  active        INTEGER NOT NULL DEFAULT 1,
+  created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
+CREATE TABLE IF NOT EXISTS clients (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  type              TEXT NOT NULL CHECK (type IN ('buyer','seller','both')),
+  name              TEXT NOT NULL,
+  phone             TEXT,
+  phone_digits      TEXT,
+  email             TEXT,
+  mailing_address   TEXT,
+  assigned_agent_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
+CREATE TABLE IF NOT EXISTS properties (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id  INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  address    TEXT NOT NULL,
+  notes      TEXT,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
+-- Comments are never edited, so the history stays trustworthy.
+CREATE TABLE IF NOT EXISTS comments (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id  INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  body       TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
+CREATE TABLE IF NOT EXISTS files (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id     INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  user_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  original_name TEXT NOT NULL,
+  stored_name   TEXT NOT NULL,
+  mime          TEXT,
+  size          INTEGER,
+  created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
+-- Automatic audit trail: who did what, and when.
+CREATE TABLE IF NOT EXISTS activity (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id  INTEGER REFERENCES clients(id) ON DELETE CASCADE,
+  user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  action     TEXT NOT NULL,
+  detail     TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  sid     TEXT PRIMARY KEY,
+  data    TEXT NOT NULL,
+  expires INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_clients_name   ON clients(name);
+CREATE INDEX IF NOT EXISTS idx_props_client   ON properties(client_id);
+CREATE INDEX IF NOT EXISTS idx_comments_client ON comments(client_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_files_client   ON files(client_id);
+CREATE INDEX IF NOT EXISTS idx_activity_client ON activity(client_id, created_at);
+`);
+
+function logActivity(clientId, userId, action, detail) {
+  db.prepare('INSERT INTO activity (client_id, user_id, action, detail) VALUES (?,?,?,?)')
+    .run(clientId, userId, action, detail || null);
+}
+
+module.exports = { db, DATA_DIR, UPLOAD_DIR, logActivity };

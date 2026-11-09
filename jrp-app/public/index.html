@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>JRP Client Book</title>
+  <meta name="description" content="JRP employee database of buyers, sellers, properties and conversation history.">
+  <meta name="theme-color" content="#14284b">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="JRP Clients">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/icon-180.png">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar" id="topbar" hidden>
+    <a href="#/" class="brand" aria-label="JRP Client Book home">
+      <img src="/icons/icon.svg" alt="" width="32" height="32">
+      <span>JRP <b>Client Book</b></span>
+    </a>
+    <nav class="topnav">
+      <a href="#/" data-nav="search">Search</a>
+      <a href="#/new" data-nav="new">+ New</a>
+      <a href="#/admin" data-nav="admin" id="nav-admin" hidden>Team</a>
+      <a href="#/account" data-nav="account" id="nav-account">Me</a>
+    </nav>
+  </header>
+  <main id="app" class="container" aria-live="polite"></main>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#14284b"/>
+  <path d="M256 92 L420 216 V408 H92 V216 Z" fill="none" stroke="#d1a94f" stroke-width="28" stroke-linejoin="round"/>
+  <text x="256" y="372" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="150" font-weight="700" fill="#f3f1ea">JRP</text>
+</svg>
