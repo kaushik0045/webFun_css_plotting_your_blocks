@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "create-admin": "node scripts/create-admin.js"
+    "create-admin": "node scripts/create-admin.js",
+    "demo-data": "node scripts/seed-demo.js"
   },
   "license": "UNLICENSED",
   "dependencies": {
