@@ -319,3 +319,28 @@ test('the app page and phone-install files are served', async () => {
   const html = await (await fetch(`${BASE}/client/5`)).text();
   assert.match(html, /JRP Client Book/, 'any page address loads the app');
 });
+
+test('oversized or garbled requests get a clear 4xx, not a server error', async () => {
+  const a = admin; // already logged in (boss@test.com is locked by the brute-force test above)
+  const id = (await a('POST', '/api/clients', { type: 'buyer', name: 'Size Test' })).data.id;
+  const big = await fetch(`${BASE}/api/clients/${id}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-JRP': '1' }, body: JSON.stringify({ body: 'y'.repeat(300000) }) });
+  assert.equal(big.status, 413);
+  const bad = await fetch(`${BASE}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-JRP': '1' }, body: '{"email": broken' });
+  assert.equal(bad.status, 400);
+});
+
+test('a seller created with listing answers is saved and matched straight away', async () => {
+  const a = admin;
+  const id = (await a('POST', '/api/clients', {
+    type: 'seller', name: 'Form Seller',
+    properties: [{ address: '4400 Coffee Rd, Modesto, CA 95355', details: { property_type: 'Gas station', asking_price: '1,050,000', brand: 'Shell', rental_income: 'yes', rental_income_amount: '3000', abc_license: 'Applied for' } }],
+  })).data.id;
+  const c = (await a('GET', `/api/clients/${id}`)).data;
+  const d = c.properties[0].details;
+  assert.equal(d.asking_price, 1050000);
+  assert.equal(d.brand, 'Shell');
+  assert.equal(d.rental_income_amount, 3000);
+  assert.equal(d.abc_license, 'Applied for');
+  assert.equal(d.listing_status, 'For sale');
+  assert.equal(c.properties[0].for_sale, true);
+});

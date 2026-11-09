@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const express = require('express');
 const session = require('express-session');
 const helmet = require('helmet');
+const compression = require('compression');
 const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const { db, UPLOAD_DIR, logActivity } = require('./src/db');
@@ -47,6 +48,7 @@ app.use(helmet({
     },
   },
 }));
+app.use(compression());
 app.use(express.json({ limit: '200kb' }));
 app.use(session({
   store: new SqliteStore(db),
@@ -63,6 +65,13 @@ const now = () => new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 const clean = (v, max = 500) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 const digits = (v) => (v || '').replace(/\D/g, '');
 const fail = (res, code, msg) => res.status(code).json({ error: msg });
+
+// Every successful change bumps dataVersion, so cached match results are rebuilt.
+let dataVersion = 0;
+app.use('/api', (req, res, next) => {
+  if (req.method !== 'GET') res.on('finish', () => { if (res.statusCode < 400) dataVersion += 1; });
+  next();
+});
 
 // Blocks cross-site form posts: every change request from our app sends this header.
 app.use('/api', (req, res, next) => {
@@ -422,27 +431,39 @@ app.get('/api/properties/:id/matches', requireAuth, (req, res) => {
 });
 
 // Every buyer x every listing, for the Matches page.
-app.get('/api/matches', requireAuth, (req, res) => {
-  const level = ['great', 'good', 'average', 'poor', 'incomplete'].includes(req.query.level) ? req.query.level : '';
-  const mine = req.query.mine === '1';
+// Scores for all pairs are worked out once per data version (fast, no sentences),
+// then only the rows actually sent get their full "See why" explanation.
+let pairCache = { version: -1, rows: null, buyers: 0, listings: 0 };
+function allPairs() {
+  if (pairCache.version === dataVersion) return pairCache;
   const buyers = match.loadBuyers(db);
   const listings = match.loadListings(db);
-  const counts = { great: 0, good: 0, average: 0, poor: 0, incomplete: 0 };
-  let rows = [];
+  const rows = [];
   for (const b of buyers) {
     for (const l of listings) {
       if (b.id === l.client_id) continue;
-      const m = match.compare(b, l);
-      if (mine && b.assigned_agent_id !== req.user.id && l.assigned_agent_id !== req.user.id) continue;
-      counts[m.level] += 1;
-      if (level && m.level !== level) continue;
-      rows.push({ buyer: match.buyerSummary(b), listing: match.listingSummary(l), ...m });
+      const m = match.compare(b, l, false);
+      rows.push({ b, l, score: m.score, level: m.level });
     }
   }
   rows.sort(match.sortMatches);
-  const total = rows.length;
-  rows = rows.slice(0, 300);
-  res.json({ counts, total, buyers: buyers.length, listings: listings.length, matches: rows });
+  pairCache = { version: dataVersion, rows, buyers: buyers.length, listings: listings.length };
+  return pairCache;
+}
+
+app.get('/api/matches', requireAuth, (req, res) => {
+  const level = ['great', 'good', 'average', 'poor', 'incomplete'].includes(req.query.level) ? req.query.level : '';
+  const mine = req.query.mine === '1';
+  const { rows, buyers, listings } = allPairs();
+  const counts = { great: 0, good: 0, average: 0, poor: 0, incomplete: 0 };
+  const picked = [];
+  for (const r of rows) {
+    if (mine && r.b.assigned_agent_id !== req.user.id && r.l.assigned_agent_id !== req.user.id) continue;
+    counts[r.level] += 1;
+    if (!level || r.level === level) picked.push(r);
+  }
+  const shown = picked.slice(0, 300).map((r) => ({ buyer: match.buyerSummary(r.b), listing: match.listingSummary(r.l), ...match.compare(r.b, r.l) }));
+  res.json({ counts, total: picked.length, buyers, listings, matches: shown });
 });
 
 // ---------- files ----------
@@ -508,6 +529,9 @@ app.use(express.static(path.join(__dirname, 'public'), { index: 'index.html' }))
 app.use((req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
+  // Problems with what the browser sent are the sender's fault (4xx), not a server error.
+  if (err && err.type === 'entity.too.large') return fail(res, 413, 'That is too much text to save at once.');
+  if (err && err.type === 'entity.parse.failed') return fail(res, 400, 'The request could not be read. Please try again.');
   console.error(err);
   fail(res, 500, 'Something went wrong');
 });

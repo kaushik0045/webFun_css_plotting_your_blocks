@@ -80,6 +80,7 @@ let navToken = 0;
 const onPage = (hash) => (location.hash || '#/') === hash;
 async function route() {
   navToken += 1;
+  whyStore.clear();
   const hash = location.hash || '#/';
   if (!me && hash !== '#/login') {
     try { me = await api('GET', '/api/me'); } catch { return; }
@@ -92,7 +93,7 @@ async function route() {
     if (parts[0] === 'new') return await viewClientForm(null);
     if (parts[0] === 'client' && parts[1] && parts[2] === 'edit') return await viewClientForm(Number(parts[1]));
     if (parts[0] === 'client' && parts[1]) return await viewClient(Number(parts[1]));
-    if (parts[0] === 'property' && parts[1]) return await viewProperty(Number(parts[1]));
+    if (parts[0] === 'property' && parts[1]) return await viewProperty(Number(parts[1]), parts[2] === 'edit');
     if (parts[0] === 'matches') return await viewMatches();
     if (parts[0] === 'admin') return await viewAdmin();
     if (parts[0] === 'account') return await viewAccount();
@@ -444,8 +445,11 @@ function whyHtml(m) {
 }
 
 let whySeq = 0;
+// "See why" details are only built when someone taps the button (keeps long lists light on old phones).
+const whyStore = new Map();
 function matchItem(m, mode) {
   const id = `why-${++whySeq}`;
+  whyStore.set(id, m);
   const L = m.listing;
   const B = m.buyer;
   const listingHtml = L ? `
@@ -463,7 +467,7 @@ function matchItem(m, mode) {
       ${head}
       ${meterHtml(m)}
       <button type="button" class="btn small ghost why-btn" data-why="${id}" aria-expanded="false" aria-controls="${id}">See why</button>
-      <div class="why" id="${id}" hidden>${whyHtml(m)}</div>
+      <div class="why" id="${id}" hidden></div>
     </li>`;
 }
 
@@ -497,6 +501,7 @@ document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-why]');
   if (!b) return;
   const el = document.getElementById(b.dataset.why);
+  if (!el.dataset.filled && whyStore.has(b.dataset.why)) { el.innerHTML = whyHtml(whyStore.get(b.dataset.why)); el.dataset.filled = '1'; }
   el.hidden = !el.hidden;
   b.textContent = el.hidden ? 'See why' : 'Hide';
   b.setAttribute('aria-expanded', String(!el.hidden));
@@ -549,6 +554,9 @@ async function viewClient(id) {
     const d = p.details || {};
     const bits = [d.listing_status, d.property_type, isEmpty(d.asking_price) ? null : `Asking ${fmtMoney(d.asking_price)}`].filter(Boolean);
     let counts = '';
+    if (isSeller && isEmpty(d.asking_price) && d.listing_status !== 'Not for sale') {
+      return `${bits.length ? `<span class="small listing-line">${bits.map(esc).join(' · ')}</span>` : ''}<span class="needs-details">+ Tap to add listing details (asking price, brand, gas volume…)</span>`;
+    }
     if (p.for_sale) {
       const mc = p.match_counts || { great: 0, good: 0 };
       counts = mc.great || mc.good
@@ -619,7 +627,7 @@ async function viewClient(id) {
       <ul class="prop-list" id="prop-list">
         ${c.properties.length ? c.properties.map((p) => `
           <li data-addr="${esc(p.address.toLowerCase())}">
-            <a class="prop-link" href="#/property/${p.id}">
+            <a class="prop-link" href="#/property/${p.id}${isSeller && isEmpty((p.details || {}).asking_price) && (p.details || {}).listing_status !== 'Not for sale' ? '/edit' : ''}">
               <span class="addr">${esc(p.address)}</span>
               ${propInfo(p)}
               ${p.notes ? `<span class="muted small notes">${esc(p.notes)}</span>` : ''}
@@ -689,8 +697,9 @@ async function viewClient(id) {
   pf.addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
-      await api('POST', `/api/clients/${id}/properties`, { address: $('#p-addr').value, notes: $('#p-notes').value });
-      toast('Property added'); viewClient(id);
+      const r = await api('POST', `/api/clients/${id}/properties`, { address: $('#p-addr').value, notes: $('#p-notes').value });
+      if (isSeller && r.id) { toast('Property added. Now answer its listing questions.'); go(`#/property/${r.id}/edit`); }
+      else { toast('Property added'); viewClient(id); }
     } catch (err) { toast(err.message, true); }
   });
 
@@ -704,7 +713,7 @@ async function viewClient(id) {
 
 // ---------- property page ----------
 let lastPropId = null;
-async function viewProperty(id) {
+async function viewProperty(id, startEditing = false) {
   const navAt = navToken;
   setNav('search');
   if (lastPropId !== id) { activeTab = 'comments'; lastPropId = id; }
@@ -712,7 +721,7 @@ async function viewProperty(id) {
   const isAdmin = me.role === 'admin';
   const sellerSide = p.client_type === 'seller' || p.client_type === 'both';
 
-  if (navAt !== navToken || !onPage(`#/property/${id}`)) return;
+  if (navAt !== navToken || !(onPage(`#/property/${id}`) || onPage(`#/property/${id}/edit`))) return;
   $app.innerHTML = `
     <a href="#/client/${p.client_id}" class="back">← ${esc(p.client_name)}</a>
     <div class="card client-head" style="margin-top:8px">
@@ -763,6 +772,7 @@ async function viewProperty(id) {
   const openEdit = () => { pf.hidden = false; $('#prop-details').hidden = true; pf.scrollIntoView({ behavior: 'smooth', block: 'start' }); $('#p-addr').focus(); };
   $('#edit-prop').addEventListener('click', openEdit);
   $('#edit-prop-2').addEventListener('click', openEdit);
+  if (startEditing) openEdit();
   $('#p-cancel').addEventListener('click', () => { pf.hidden = true; $('#prop-details').hidden = false; });
   pf.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -770,6 +780,7 @@ async function viewProperty(id) {
       const body = { address: $('#p-addr').value, notes: $('#p-notes').value };
       if (sellerSide) body.details = readQuestionFields(Q.seller, 'sq');
       await api('PATCH', `/api/properties/${id}`, body);
+      if (onPage(`#/property/${id}/edit`)) { history.replaceState(null, '', `#/property/${id}`); }
       toast('Saved'); viewProperty(id);
     } catch (err) { toast(err.message, true); }
   });
@@ -827,10 +838,17 @@ async function viewClientForm(id) {
           ${questionFields(Q.buyer, c.details || {}, 'bq')}
         </div>
         ${id ? '' : `
-        <div class="field"><label>Properties / sites</label>
+        <div id="seller-qs" class="q-section" ${c.type === 'buyer' ? 'hidden' : ''}>
+          <h2>Property they are selling</h2>
+          <p class="muted small">These answers are used to match this property with buyers. You can add more properties below.</p>
+          <div class="field"><label for="sq-address">Property address *</label>
+            <input id="sq-address" maxlength="300" placeholder="e.g. 1150 Crows Landing Rd, Modesto, CA 95351"></div>
+          ${questionFields(Q.seller, { listing_status: 'For sale' }, 'sq')}
+        </div>
+        <div class="field q-section"><label id="props-label">${c.type === 'buyer' ? 'Properties / sites' : 'Other properties (optional)'}</label>
           <div id="props"></div>
           <button type="button" class="btn small ghost" id="more-prop">+ Another property</button>
-          <span class="help" id="seller-hint" ${c.type === 'buyer' ? 'hidden' : ''}>After saving, open each property to add its asking price and type, so buyers can be matched.</span></div>
+          <span class="help" id="seller-hint" ${c.type === 'buyer' ? 'hidden' : ''}>Other properties are saved with just the address. Open each one later to answer its questions.</span></div>
         <div class="field"><label for="f-first">First comment (optional)</label>
           <textarea id="f-first" maxlength="5000" placeholder="How did they reach us? What are they looking for?"></textarea></div>`}
         <p class="error" id="form-err"></p>
@@ -843,6 +861,8 @@ async function viewClientForm(id) {
     type = b.dataset.t; $$('#type-chips .chip').forEach((x) => x.classList.toggle('on', x === b));
     $('#buyer-qs').hidden = type === 'seller';
     if ($('#seller-hint')) $('#seller-hint').hidden = type === 'buyer';
+    if ($('#seller-qs')) $('#seller-qs').hidden = type === 'buyer';
+    if ($('#props-label')) $('#props-label').textContent = type === 'buyer' ? 'Properties / sites' : 'Other properties (optional)';
   }));
   const addPropRow = () => {
     const row = document.createElement('div');
@@ -851,7 +871,10 @@ async function viewClientForm(id) {
     $('button', row).addEventListener('click', () => row.remove());
     $('#props').appendChild(row);
   };
-  if (!id) { addPropRow(); $('#more-prop').addEventListener('click', addPropRow); }
+  if (!id) {
+    if (c.type === 'buyer') addPropRow();
+    $('#more-prop').addEventListener('click', addPropRow);
+  }
 
   $('#client-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -871,6 +894,18 @@ async function viewClientForm(id) {
         toast('Saved'); go(`#/client/${id}`);
       } else {
         body.properties = $$('.p-in').map((i) => ({ address: i.value })).filter((p) => p.address.trim());
+        if (type !== 'buyer') {
+          const answers = readQuestionFields(Q.seller, 'sq');
+          const addr = $('#sq-address').value.trim();
+          const answered = Object.entries(answers).some(([k, v]) => k !== 'listing_status' && !isEmpty(v));
+          if (!addr && answered) {
+            $('#form-err').textContent = 'Please add the address of the property they are selling.';
+            $('#sq-address').focus();
+            btn.disabled = false;
+            return;
+          }
+          if (addr) body.properties.unshift({ address: addr, details: answers });
+        }
         if (type === 'buyer' && body.details && body.details.exchange_1031 === 'yes'
           && confirm('This buyer is doing a 1031 exchange, so they are probably selling a property too.\n\nSave them as a Buyer & Seller instead?')) {
           body.type = 'both';
@@ -883,6 +918,11 @@ async function viewClientForm(id) {
     } catch (err) { $('#form-err').textContent = err.message; btn.disabled = false; }
   });
 }
+
+// Pop-up windows: use the built-in <dialog> where the phone supports it (iOS 15.4+),
+// otherwise just show it on the page.
+function openDialog(d) { if (typeof d.showModal === 'function') d.showModal(); else { d.setAttribute('open', ''); d.classList.add('fallback-open'); } }
+function closeDialog(d) { if (typeof d.close === 'function') d.close(); else { d.removeAttribute('open'); d.classList.remove('fallback-open'); } }
 
 // ---------- admin: team ----------
 async function viewAdmin() {
@@ -927,7 +967,7 @@ async function viewAdmin() {
         <input id="u-pw" type="text" minlength="8" autocomplete="new-password" ${u ? '' : 'required'}></div>
       <p class="error" id="u-err"></p>
       <div class="row"><button class="btn" value="save" type="submit">Save</button><button class="btn ghost" type="button" id="u-cancel">Cancel</button></div>`;
-    $('#u-cancel').addEventListener('click', () => dlg.close());
+    $('#u-cancel').addEventListener('click', () => closeDialog(dlg));
     form.onsubmit = async (e) => {
       e.preventDefault();
       try {
@@ -941,10 +981,10 @@ async function viewAdmin() {
           });
         }
         agentsCache = null;
-        dlg.close(); toast('Saved'); viewAdmin();
+        closeDialog(dlg); toast('Saved'); viewAdmin();
       } catch (err) { $('#u-err').textContent = err.message; }
     };
-    dlg.showModal();
+    openDialog(dlg);
   };
   $('#add-user').addEventListener('click', () => open(null));
   $$('[data-edit-user]').forEach((b) => b.addEventListener('click', () => open(users.find((u) => u.id === Number(b.dataset.editUser)))));

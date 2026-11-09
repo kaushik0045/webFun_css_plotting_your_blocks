@@ -50,26 +50,43 @@ function changedLabels(questions, before, after) {
   return questions.filter((q) => JSON.stringify(before[q.key] ?? null) !== JSON.stringify(after[q.key] ?? null)).map((q) => q.label);
 }
 
+// Small memo so repeated lookups (same address / same buyer text) are instant.
+function memo(fn, max = 5000) {
+  const cache = new Map();
+  return (key) => {
+    const k = String(key ?? '');
+    if (cache.has(k)) return cache.get(k);
+    if (cache.size >= max) cache.clear();
+    const v = fn(k);
+    cache.set(k, v);
+    return v;
+  };
+}
+
 // "CA, nevada" -> ['CA', 'NV']
 const NAME_TO_CODE = Object.fromEntries(Object.entries(STATES).map(([code, name]) => [name.toLowerCase(), code]));
-function statesOf(text) {
+const statesOf = memo((text) => {
   const out = [];
-  for (const raw of String(text || '').split(/[,;/]+|\s+and\s+/i)) {
+  for (const raw of text.split(/[,;/]+|\s+and\s+/i)) {
     const t = raw.trim();
     const code = STATES[t.toUpperCase()] ? t.toUpperCase() : NAME_TO_CODE[t.toLowerCase()];
     if (code && !out.includes(code)) out.push(code);
   }
   return out;
-}
+});
 // Which state is an address in? Looks for ", CA" / " CA 95350" or the full state name.
-function stateOfAddress(address) {
-  const a = String(address || '');
-  for (const [code, name] of Object.entries(STATES)) {
-    if (new RegExp(`(^|[\\s,])${code}(\\s+\\d{5}|\\s*,|\\s*$)`).test(a)) return code;
-    if (new RegExp(`\\b${name}\\b`, 'i').test(a)) return code;
+// The patterns are built once, not on every comparison.
+const STATE_PATTERNS = Object.entries(STATES).map(([code, name]) => ({
+  code,
+  short: new RegExp(`(^|[\\s,])${code}(\\s+\\d{5}|\\s*,|\\s*$)`),
+  long: new RegExp(`\\b${name}\\b`, 'i'),
+}));
+const stateOfAddress = memo((a) => {
+  for (const sp of STATE_PATTERNS) {
+    if (sp.short.test(a) || sp.long.test(a)) return sp.code;
   }
   return null;
-}
+});
 
 function placesOf(text) {
   return String(text || '').split(/[,;/]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
@@ -84,7 +101,7 @@ function scoreRule(rule, listing, buyer) {
   if (rule.kind === 'price') {
     if (blank(s) || blank(b)) {
       const who = [blank(s) && "seller's asking price", blank(b) && "buyer's budget"].filter(Boolean).join(' and ');
-      return { ...base, status: 'missing', score: null, text: `Add the ${who} to compare price.`.replace("buyer's budget", "buyer's funds") };
+      return { ...base, status: 'missing', score: null, why: () => `Add the ${who} to compare price.`.replace("buyer's budget", "buyer's funds") };
     }
     const asking = Number(s);
     const budget = Number(b);
@@ -95,72 +112,72 @@ function scoreRule(rule, listing, buyer) {
       const left = -diff;
       const leftPct = budget ? (left / budget) * 100 : 0;
       const calc = { asking, budget, difference: left, direction: 'under', pctOfBudget: leftPct, ...cashInfo };
-      if (left === 0) return { ...base, status: 'match', score: 100, calc, text: `Exact match: asking price equals the buyer's funds (${money(budget)}).` };
+      if (left === 0) return { ...base, status: 'match', score: 100, calc, why: () => `Exact match: asking price equals the buyer's funds (${money(budget)}).` };
       if (asking < budget * 0.6) {
         return { ...base, status: 'partial', score: 75, calc,
-          text: `${money(left)} under their funds (${pct(leftPct)} less). Much cheaper than they can spend, so it may be smaller than what they want.` };
+          why: () => `${money(left)} under their funds (${pct(leftPct)} less). Much cheaper than they can spend, so it may be smaller than what they want.` };
       }
-      return { ...base, status: 'match', score: 100, calc, text: `Within funds: ${money(left)} left over (${pct(leftPct)} under their funds).` };
+      return { ...base, status: 'match', score: 100, calc, why: () => `Within funds: ${money(left)} left over (${pct(leftPct)} under their funds).` };
     }
     const overPct = budget ? (diff / budget) * 100 : 100;
     const dropPct = (diff / asking) * 100;
     const score = Math.max(0, Math.round(100 - 5 * overPct));
     return { ...base, status: score >= 70 ? 'partial' : 'miss', score,
       calc: { asking, budget, difference: diff, direction: 'over', pctOfBudget: overPct, sellerDropPct: dropPct, ...cashInfo },
-      text: `${money(diff)} more than the buyer's funds. The buyer would need ${pct(overPct)} more money, or the seller would need to lower the price by ${pct(dropPct)} to ${money(budget)}.` };
+      why: () => `${money(diff)} more than the buyer's funds. The buyer would need ${pct(overPct)} more money, or the seller would need to lower the price by ${pct(dropPct)} to ${money(budget)}.` };
   }
 
   if (rule.kind === 'oneOf') {
     const wanted = Array.isArray(b) ? b : blank(b) ? [] : [b];
-    if (!wanted.length) return { ...base, status: 'any', score: null, text: `Buyer is open to any ${rule.label.toLowerCase()}${blank(s) ? '' : ` (this one: ${s})`}.` };
-    if (blank(s)) return { ...base, status: 'missing', score: null, text: `Add the ${rule.label.toLowerCase()} for this property.` };
+    if (!wanted.length) return { ...base, status: 'any', score: null, why: () => `Buyer is open to any ${rule.label.toLowerCase()}${blank(s) ? '' : ` (this one: ${s})`}.` };
+    if (blank(s)) return { ...base, status: 'missing', score: null, why: () => `Add the ${rule.label.toLowerCase()} for this property.` };
     return wanted.includes(s)
-      ? { ...base, status: 'match', score: 100, text: `${s}: the buyer wants this (${wanted.join(', ')}).` }
-      : { ...base, status: 'miss', score: 0, text: `This is a ${s}, but the buyer wants ${wanted.join(', ')}.` };
+      ? { ...base, status: 'match', score: 100, why: () => `${s}: the buyer wants this (${wanted.join(', ')}).` }
+      : { ...base, status: 'miss', score: 0, why: () => `This is a ${s}, but the buyer wants ${wanted.join(', ')}.` };
   }
 
   if (rule.kind === 'state') {
     const wanted = statesOf(b);
-    if (!wanted.length) return { ...base, status: 'any', score: null, text: 'Buyer is open to any state.' };
+    if (!wanted.length) return { ...base, status: 'any', score: null, why: () => 'Buyer is open to any state.' };
     const st = stateOfAddress(listing.address);
-    if (!st) return { ...base, status: 'missing', score: null, text: 'Add the state to this property\'s address (e.g. "Modesto, CA 95350").' };
+    if (!st) return { ...base, status: 'missing', score: null, why: () => 'Add the state to this property\'s address (e.g. "Modesto, CA 95350").' };
     return wanted.includes(st)
-      ? { ...base, status: 'match', score: 100, text: `In ${STATES[st]}, a state the buyer wants (${wanted.join(', ')}).` }
-      : { ...base, status: 'miss', score: 0, text: `This property is in ${STATES[st]}, but the buyer wants ${wanted.map((c) => STATES[c]).join(', ')}.` };
+      ? { ...base, status: 'match', score: 100, why: () => `In ${STATES[st]}, a state the buyer wants (${wanted.join(', ')}).` }
+      : { ...base, status: 'miss', score: 0, why: () => `This property is in ${STATES[st]}, but the buyer wants ${wanted.map((c) => STATES[c]).join(', ')}.` };
   }
 
   if (rule.kind === 'branding') {
-    if (blank(b) || b === 'Either') return { ...base, status: 'any', score: null, text: 'Buyer is fine with branded or independent.' };
-    if (blank(s)) return { ...base, status: 'missing', score: null, text: 'Add the brand for this property.' };
+    if (blank(b) || b === 'Either') return { ...base, status: 'any', score: null, why: () => 'Buyer is fine with branded or independent.' };
+    if (blank(s)) return { ...base, status: 'missing', score: null, why: () => 'Add the brand for this property.' };
     const isIndependent = s === 'Unbranded';
     const ok = (b === 'Independent') === isIndependent;
     return ok
-      ? { ...base, status: 'match', score: 100, text: `${isIndependent ? 'Independent (unbranded)' : `Branded (${s})`}, as the buyer wants.` }
-      : { ...base, status: 'miss', score: 0, text: `Buyer wants ${b.toLowerCase()}, but this station is ${isIndependent ? 'independent (unbranded)' : `branded (${s})`}.` };
+      ? { ...base, status: 'match', score: 100, why: () => `${isIndependent ? 'Independent (unbranded)' : `Branded (${s})`}, as the buyer wants.` }
+      : { ...base, status: 'miss', score: 0, why: () => `Buyer wants ${b.toLowerCase()}, but this station is ${isIndependent ? 'independent (unbranded)' : `branded (${s})`}.` };
   }
 
   if (rule.kind === 'place') {
     const wanted = placesOf(b);
-    if (!wanted.length) return { ...base, status: 'any', score: null, text: 'Buyer is open to any location.' };
+    if (!wanted.length) return { ...base, status: 'any', score: null, why: () => 'Buyer is open to any location.' };
     const where = `${rule.seller === 'address' ? '' : s || ''} ${listing.address || ''}`.toLowerCase();
     const hit = wanted.find((w) => where.includes(w));
     return hit
-      ? { ...base, status: 'match', score: 100, text: `In ${b.split(/[,;/]+/).map((x) => x.trim()).find((x) => x.toLowerCase() === hit)}, one of the buyer's preferred areas.` }
-      : { ...base, status: 'miss', score: 0, text: `Buyer prefers ${b}; this property is at ${listing.address}.` };
+      ? { ...base, status: 'match', score: 100, why: () => `In ${b.split(/[,;/]+/).map((x) => x.trim()).find((x) => x.toLowerCase() === hit)}, one of the buyer's preferred areas.` }
+      : { ...base, status: 'miss', score: 0, why: () => `Buyer prefers ${b}; this property is at ${listing.address}.` };
   }
 
   if (rule.kind === 'atLeast') {
-    if (blank(b)) return { ...base, status: 'any', score: null, text: `Buyer has no minimum ${rule.label.toLowerCase()}.` };
-    if (blank(s)) return { ...base, status: 'missing', score: null, text: `Add the ${rule.label.toLowerCase()} for this property.` };
+    if (blank(b)) return { ...base, status: 'any', score: null, why: () => `Buyer has no minimum ${rule.label.toLowerCase()}.` };
+    if (blank(s)) return { ...base, status: 'missing', score: null, why: () => `Add the ${rule.label.toLowerCase()} for this property.` };
     const have = Number(s);
     const need = Number(b);
-    if (have >= need) return { ...base, status: 'match', score: 100, text: `${num(have)} ${rule.unit || ''} meets the buyer's minimum of ${num(need)}.`.replace('  ', ' ') };
+    if (have >= need) return { ...base, status: 'match', score: 100, why: () => `${num(have)} ${rule.unit || ''} meets the buyer's minimum of ${num(need)}.`.replace('  ', ' ') };
     const shortPct = ((need - have) / need) * 100;
     const score = Math.max(0, Math.round(100 - 3 * shortPct));
     return { ...base, status: score >= 70 ? 'partial' : 'miss', score,
-      text: `${num(need - have)} ${rule.unit || ''} smaller than the buyer's minimum (${pct(shortPct)} short).`.replace('  ', ' ') };
+      why: () => `${num(need - have)} ${rule.unit || ''} smaller than the buyer's minimum (${pct(shortPct)} short).`.replace('  ', ' ') };
   }
-  return { ...base, status: 'any', score: null, text: '' };
+  return { ...base, status: 'any', score: null, why: () => '' };
 }
 
 function levelFor(score) {
@@ -168,8 +185,14 @@ function levelFor(score) {
 }
 
 // Compare one buyer with one listing. Returns score, level and the full "See why" breakdown.
-function compare(buyer, listing) {
-  const parts = MATCH_RULES.map((r) => scoreRule(r, listing, buyer));
+// explain = false skips writing the "See why" sentences (much faster for big lists).
+function compare(buyer, listing, explain = true) {
+  const parts = MATCH_RULES.map((r) => {
+    const part = scoreRule(r, listing, buyer);
+    if (explain) part.text = part.why ? part.why() : '';
+    part.why = undefined; // not sent to the browser
+    return part;
+  });
   const counted = parts.filter((p) => p.score !== null);
   const requiredMissing = MATCH_RULES.some((r) => r.required && parts.find((p) => p.key === r.key).status === 'missing');
   if (requiredMissing || !counted.length) {
@@ -188,7 +211,7 @@ function compare(buyer, listing) {
     parts,
     math: {
       lines: counted.map((p) => ({ label: p.label, score: p.score, weightPct: Math.round((p.weight / totalWeight) * 1000) / 10 })),
-      capped: capped ? `Capped at 30 because ${broken.map((r) => r.label.toLowerCase()).join(' and ')} does not match.` : null,
+      capped: capped && explain ? `Capped at 30 because ${broken.map((r) => r.label.toLowerCase()).join(' and ')} does not match.` : capped ? 'capped' : null,
     },
   };
 }

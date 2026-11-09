@@ -31,6 +31,9 @@ body {
   color: var(--text);
   -webkit-font-smoothing: antialiased;
   padding-bottom: env(safe-area-inset-bottom);
+  /* very long names / emails / addresses wrap instead of pushing the screen sideways */
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 a { color: var(--white); text-decoration-color: var(--red); text-underline-offset: 3px; }
 h1, h2, h3 {
@@ -50,7 +53,7 @@ h3 { font-size: .95rem; }
   position: sticky; top: 0; z-index: 10;
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
-  background: rgba(8, 8, 10, .94); backdrop-filter: blur(10px);
+  background: rgba(8, 8, 10, .94); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
 }
 .brand { display: flex; align-items: center; text-decoration: none; }
@@ -366,3 +369,12 @@ h2 .count {
   font: 700 .68rem/1 var(--head); letter-spacing: .12em; text-transform: uppercase; color: #55555c;
 }
 .pw-toggle:hover { color: var(--red); }
+
+/* older Safari: no :has(), so also mark ticked boxes via the text next to them */
+.check input:checked + span { color: #fff; font-weight: 600; }
+dialog.fallback-open { position: fixed; top: 10vh; left: 50%; transform: translateX(-50%); z-index: 60; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .7); }
+
+.spread > *, .row > *, .contact-list .v, .pair > div { min-width: 0; }
+
+.needs-details { display: inline-block; margin-top: 4px; color: #fff; font-weight: 600; font-size: .85rem;
+  background: rgba(225, 6, 0, .18); border: 1px dashed var(--red); padding: 4px 8px; }
