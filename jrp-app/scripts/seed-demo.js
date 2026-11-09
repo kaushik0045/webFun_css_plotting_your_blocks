@@ -20,37 +20,58 @@ const mike = addUser('Mike Torres', 'mike@demo.com', 'staff');
 
 const ago = (days, hours = 0) => new Date(Date.now() - (days * 24 + hours) * 3600e3).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
+// props: [address, notes, listing details]     comments: [user, daysAgo, text, propertyIndex?]
 const clients = [
   { type: 'seller', name: 'Maria Lopez', phone: '(209) 555-0142', email: 'maria.lopez@example.com', mail: '1420 Oak Ave, Modesto, CA 95350', agent: priya,
-    props: [['1420 Oak Ave, Modesto, CA 95350', '3 bed / 2 bath, 1,650 sq ft. Asking $519,000'], ['88 River Rd, Turlock, CA 95380', 'Vacant lot, 0.4 acre']],
+    props: [
+      ['1420 Oak Ave, Modesto, CA 95350', '3 bed / 2 bath', { listing_status: 'For sale', property_type: 'Single-family home', asking_price: 519000, city: 'Modesto', size_sqft: 1650, timeline: '1–3 months' }],
+      ['88 River Rd, Turlock, CA 95380', 'Vacant lot', { listing_status: 'Not for sale', property_type: 'Land / Lot', city: 'Turlock', lot_acres: 0.4 }]],
     comments: [[priya, 20, 'First call. Maria wants to sell the Oak Ave house in spring. Expects around $520k.'],
       [admin, 14, 'Sent comparable sales for her street. She agreed $519k is fair.', 0],
       [priya, 6, 'Photographer booked for next Tuesday 10am.', 0],
       [mike, 4, 'River Rd lot: county says it is zoned residential. Maria may sell it later.', 1],
       [mike, 1, 'Buyer James Carter asked for a showing this weekend. Maria approved Saturday 2pm.', 0]] },
   { type: 'buyer', name: 'James Carter', phone: '209-555-7781', email: 'jcarter@example.com', mail: '', agent: mike,
-    props: [['1420 Oak Ave, Modesto, CA 95350', 'Interested, showing Saturday']],
+    details: { property_types: ['Single-family home'], budget_max: 480000, preferred_cities: 'Modesto, Ceres', financing: 'Pre-approved loan', timeline: '1–3 months' },
+    props: [['1420 Oak Ave, Modesto, CA 95350', 'Interested, showing Saturday', { listing_status: 'Not for sale' }]],
     comments: [[mike, 10, 'Pre-approved up to $480k with Valley Credit Union. Wants 3 bed in Modesto, good schools.'],
       [mike, 2, 'Likes Oak Ave but thinks it is over budget. Will try to stretch to $500k.']] },
-  { type: 'both', name: 'Harpreet & Simran Gill', phone: '(209) 555-3310', email: 'gill.family@example.com', mail: '502 Sylvan Ave, Modesto, CA 95355', agent: admin,
-    props: [['502 Sylvan Ave, Modesto, CA 95355', 'Selling current home'], ['2215 Coffee Rd, Modesto, CA 95355', 'Possible purchase, 4 bed']],
-    comments: [[admin, 30, 'Family is upsizing. Selling Sylvan Ave and buying a 4-bed nearby.'],
-      [priya, 8, 'Toured Coffee Rd. They loved the backyard. Waiting on their lender.']] },
   { type: 'seller', name: 'Raman Singh', phone: '(209) 555-4400', email: 'rsingh@example.com', mail: '3100 McHenry Ave, Modesto, CA 95350', agent: admin,
-    props: [['3100 McHenry Ave, Modesto, CA 95350', 'Retail strip, 6 units, 92% leased'], ['1150 Crows Landing Rd, Modesto, CA 95351', 'Truck stop + fuel station'],
-      ['455 Main St, Ripon, CA 95366', '4-plex, all units rented'], ['2900 Geer Rd, Turlock, CA 95382', 'Hotel site, 2.1 acres'],
-      ['18 Hwy 99 Frontage Rd, Ceres, CA 95307', 'Vacant commercial lot'], ['720 W Yosemite Ave, Manteca, CA 95337', 'Office building, 12,000 sq ft'],
-      ['901 Pelandale Ave, Modesto, CA 95356', 'Duplex']],
-    comments: [[admin, 25, 'Raman wants to sell 3 of his 7 properties this year to fund a new hotel project.'],
-      [priya, 9, 'Sent him a pricing summary for the Ripon 4-plex and the Ceres lot.'],
-      [admin, 7, 'Two investors interested. Want rent roll and last 2 years of expenses.', 2],
-      [mike, 3, 'Walked the Ceres lot with a developer. Asked about utility hookups.', 4],
-      [admin, 2, 'Truck stop: fuel supplier contract runs until 2028. Need to disclose.', 1]] },
+    props: [
+      ['1150 Crows Landing Rd, Modesto, CA 95351', 'Fuel station with convenience store', { listing_status: 'For sale', property_type: 'Gas station', asking_price: 1000000, city: 'Modesto', size_sqft: 2400, lot_acres: 0.9, timeline: 'ASAP', reason: 'Retiring' }],
+      ['3100 McHenry Ave, Modesto, CA 95350', 'Retail strip, 6 units, 92% leased', { listing_status: 'For sale', property_type: 'Retail / Strip center', asking_price: 2850000, city: 'Modesto', size_sqft: 14000 }],
+      ['455 Main St, Ripon, CA 95366', '4-plex, all units rented', { listing_status: 'For sale', property_type: 'Multifamily (2–4 units)', asking_price: 1150000, city: 'Ripon', size_sqft: 3800 }],
+      ['2900 Geer Rd, Turlock, CA 95382', 'Hotel site, 2.1 acres', { listing_status: 'Not for sale', property_type: 'Land / Lot', city: 'Turlock', lot_acres: 2.1 }],
+      ['18 Hwy 99 Frontage Rd, Ceres, CA 95307', 'Truck stop with 40 truck spaces', { listing_status: 'For sale', property_type: 'Truck stop', asking_price: 3400000, city: 'Ceres', lot_acres: 6 }],
+      ['720 W Yosemite Ave, Manteca, CA 95337', 'Office building', { listing_status: 'Under contract', property_type: 'Office', asking_price: 2100000, city: 'Manteca', size_sqft: 12000 }],
+      ['901 Pelandale Ave, Modesto, CA 95356', 'Duplex', { listing_status: 'For sale', property_type: 'Multifamily (2–4 units)', asking_price: 640000, city: 'Modesto', size_sqft: 2100 }]],
+    comments: [[admin, 25, 'Raman wants to sell several properties this year to fund a new hotel project.'],
+      [priya, 9, 'Sent him a pricing summary for the Ripon 4-plex and the duplex.'],
+      [admin, 7, 'Two investors interested in Ripon. Want rent roll and last 2 years of expenses.', 2],
+      [admin, 2, 'Gas station: fuel supplier contract runs until 2028. Need to disclose.', 0]] },
+  { type: 'buyer', name: 'Gurpreet Dhillon', phone: '(209) 555-3001', email: 'gdhillon@example.com', mail: '', agent: priya,
+    details: { property_types: ['Gas station', 'Truck stop'], budget_max: 1000000, preferred_cities: 'Modesto, Ceres, Turlock', financing: 'Cash', timeline: 'ASAP' },
+    props: [], comments: [[priya, 5, 'Cash buyer, owns 2 stations in Fresno. Wants another along 99.']] },
+  { type: 'buyer', name: 'Anil Patel', phone: '(209) 555-3002', email: 'apatel@example.com', mail: '', agent: mike,
+    details: { property_types: ['Gas station', 'Hotel / Motel'], budget_max: 950000, preferred_cities: 'Modesto', financing: 'Pre-approved loan', timeline: '1–3 months' },
+    props: [], comments: [[mike, 3, 'SBA pre-approval for $950k. Flexible on type.']] },
+  { type: 'buyer', name: 'Sandeep Gill', phone: '(209) 555-3003', email: '', mail: '', agent: admin,
+    details: { property_types: ['Gas station'], budget_max: 880000, preferred_cities: 'Modesto, Stockton', financing: 'Needs financing' },
+    props: [], comments: [] },
+  { type: 'buyer', name: 'Tom Reyes', phone: '(209) 555-3004', email: 'treyes@example.com', mail: '', agent: priya,
+    details: { property_types: ['Gas station'], budget_max: 700000, financing: 'Needs financing', timeline: '6–12 months' },
+    props: [], comments: [[priya, 12, 'First-time buyer, still sorting out financing.']] },
   { type: 'buyer', name: 'David Nguyen', phone: '(916) 555-2044', email: 'dnguyen@example.com', mail: '', agent: priya,
-    props: [], comments: [[priya, 3, 'Investor looking for rental properties under $350k in Ceres or Turlock.']] },
+    details: { property_types: ['Multifamily (2–4 units)', 'Single-family home'], budget_max: 1200000, preferred_cities: 'Ripon, Modesto, Manteca', financing: 'Cash', timeline: '3–6 months' },
+    props: [], comments: [[priya, 3, 'Investor looking for rental properties. Prefers 2-4 units.']] },
+  { type: 'both', name: 'Harpreet & Simran Gill', phone: '(209) 555-3310', email: 'gill.family@example.com', mail: '502 Sylvan Ave, Modesto, CA 95355', agent: admin,
+    details: { property_types: ['Single-family home'], budget_max: 750000, preferred_cities: 'Modesto', min_size_sqft: 2200, financing: 'Pre-approved loan', timeline: '3–6 months' },
+    props: [['502 Sylvan Ave, Modesto, CA 95355', 'Selling current home', { listing_status: 'For sale', property_type: 'Single-family home', asking_price: 465000, city: 'Modesto', size_sqft: 1500 }]],
+    comments: [[admin, 30, 'Family is upsizing. Selling Sylvan Ave and buying a 4-bed nearby.'],
+      [priya, 8, 'They loved a backyard on Coffee Rd. Waiting on their lender.']] },
   { type: 'seller', name: 'Linda Brooks', phone: '(209) 555-8890', email: '', mail: '77 Elm St, Ceres, CA 95307', agent: mike,
-    props: [['77 Elm St, Ceres, CA 95307', '2 bed condo, HOA $210/mo']],
-    comments: [[mike, 45, 'Inherited condo. Wants a quick sale.'], [mike, 40, 'Listed at $289,000.'], [admin, 12, 'Offer received at $275k. Linda countering at $284k.']] },
+    props: [['77 Elm St, Ceres, CA 95307', '2 bed condo, HOA $210/mo', { listing_status: 'For sale', property_type: 'Condo / Townhouse', asking_price: 289000, city: 'Ceres', size_sqft: 980, timeline: 'ASAP', reason: 'Inherited' }]],
+    comments: [[mike, 45, 'Inherited condo. Wants a quick sale.'], [mike, 40, 'Listed at $289,000.', 0], [admin, 12, 'Offer received at $275k. Linda countering at $284k.', 0]] },
   { type: 'buyer', name: 'Ahmed Khan', phone: '(209) 555-6620', email: 'ahmed.k@example.com', mail: '', agent: null,
     props: [], comments: [] },
 ];
@@ -58,12 +79,12 @@ const clients = [
 const tx = db.transaction(() => {
   for (const c of clients) {
     const created = ago(c.comments.length ? c.comments[0][1] + 1 : 1);
-    const id = db.prepare(`INSERT INTO clients (type, name, phone, phone_digits, email, mailing_address, assigned_agent_id, created_by, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?)`).run(c.type, c.name, c.phone, c.phone.replace(/\D/g, ''), c.email, c.mail, c.agent, admin, created, created).lastInsertRowid;
+    const id = db.prepare(`INSERT INTO clients (type, name, phone, phone_digits, email, mailing_address, assigned_agent_id, created_by, created_at, updated_at, details)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(c.type, c.name, c.phone, c.phone.replace(/\D/g, ''), c.email, c.mail, c.agent, admin, created, created, JSON.stringify(c.details || {})).lastInsertRowid;
     db.prepare('INSERT INTO activity (client_id, user_id, action, detail, created_at) VALUES (?,?,?,?,?)')
       .run(id, admin, 'created', `Added ${c.type} "${c.name}"`, created);
-    const propIds = c.props.map(([address, notes]) => db.prepare('INSERT INTO properties (client_id, address, notes, created_by, created_at) VALUES (?,?,?,?,?)')
-      .run(id, address, notes, admin, created).lastInsertRowid);
+    const propIds = c.props.map(([address, notes, details]) => db.prepare('INSERT INTO properties (client_id, address, notes, created_by, created_at, details) VALUES (?,?,?,?,?,?)')
+      .run(id, address, notes, admin, created, JSON.stringify(details || {})).lastInsertRowid);
     let last = created;
     for (const [uid, days, body, propIdx] of c.comments) {
       last = ago(days, Math.floor(Math.random() * 8));

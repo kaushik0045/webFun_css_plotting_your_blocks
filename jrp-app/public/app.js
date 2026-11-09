@@ -73,7 +73,13 @@ function setNav(active) {
 }
 
 // ---------- router ----------
+// Every screen change bumps navToken. A screen that finishes loading after the
+// person has already moved on checks it and quietly does nothing.
+let navToken = 0;
+// True only while the address bar still shows this screen.
+const onPage = (hash) => (location.hash || '#/') === hash;
 async function route() {
+  navToken += 1;
   const hash = location.hash || '#/';
   if (!me && hash !== '#/login') {
     try { me = await api('GET', '/api/me'); } catch { return; }
@@ -87,6 +93,7 @@ async function route() {
     if (parts[0] === 'client' && parts[1] && parts[2] === 'edit') return await viewClientForm(Number(parts[1]));
     if (parts[0] === 'client' && parts[1]) return await viewClient(Number(parts[1]));
     if (parts[0] === 'property' && parts[1]) return await viewProperty(Number(parts[1]));
+    if (parts[0] === 'matches') return await viewMatches();
     if (parts[0] === 'admin') return await viewAdmin();
     if (parts[0] === 'account') return await viewAccount();
     $app.innerHTML = '<div class="empty">Page not found. <a href="#/">Go to search</a></div>';
@@ -135,8 +142,10 @@ function viewLogin() {
 // type: all | buyer | seller     agent: '' (everyone) | 'me' | 'none' (unassigned) | employee id
 const searchState = { q: '', type: 'all', agent: '' };
 async function viewSearch() {
+  const navAt = navToken;
   setNav('search');
   const team = await agents();
+  if (navAt !== navToken || !onPage('#/')) return;
   $app.innerHTML = `
     <p class="kicker">Client Book</p>
     <h1>Hi, ${esc(me.name.split(' ')[0])}</h1>
@@ -313,15 +322,214 @@ function bindLog(baseUrl, reload) {
   }));
 }
 
+// ---------- questions & matching (shared) ----------
+let questionsCache = null;
+async function questions() {
+  if (!questionsCache) questionsCache = await api('GET', '/api/questions');
+  return questionsCache;
+}
+const fmtMoney = (n) => (n === null || n === undefined || n === '' ? '' : '$' + Math.round(Number(n)).toLocaleString('en-US'));
+const isEmpty = (v) => v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length);
+
+function fmtAnswer(q, v) {
+  if (isEmpty(v)) return '';
+  if (q.type === 'money') return fmtMoney(v);
+  if (q.type === 'number') return Number(v).toLocaleString('en-US');
+  if (q.type === 'multiselect') return v.join(', ');
+  if (q.type === 'yesno') return v === 'yes' ? 'Yes' : 'No';
+  return String(v);
+}
+
+// Read-only list of answers.
+function answersHtml(list, values, emptyMsg) {
+  const answered = list.filter((q) => !isEmpty(values[q.key]));
+  if (!answered.length) return `<p class="muted">${esc(emptyMsg)}</p>`;
+  const missing = list.length - answered.length;
+  return `<ul class="contact-list">${answered.map((q) => `
+      <li><span class="k">${esc(q.label)}</span><span class="v" style="white-space:pre-wrap">${esc(fmtAnswer(q, values[q.key]))}</span></li>`).join('')}
+    </ul>${missing ? `<p class="muted small" style="margin:8px 0 0">${missing} question${missing === 1 ? '' : 's'} not answered yet.</p>` : ''}`;
+}
+
+// Form inputs built from the question list in src/questions.js.
+function questionFields(list, values, prefix) {
+  return list.map((q) => {
+    const id = `${prefix}-${q.key}`;
+    const v = values[q.key];
+    const help = q.help ? `<span class="help">${esc(q.help)}</span>` : '';
+    let input;
+    if (q.type === 'money') {
+      input = `<div class="money-in"><span>$</span><input id="${id}" inputmode="decimal" autocomplete="off" placeholder="0" value="${isEmpty(v) ? '' : esc(Number(v).toLocaleString('en-US'))}"></div>`;
+    } else if (q.type === 'number') {
+      input = `<input id="${id}" inputmode="decimal" autocomplete="off" value="${isEmpty(v) ? '' : esc(v)}">`;
+    } else if (q.type === 'select' || q.type === 'yesno') {
+      const opts = q.type === 'yesno' ? [['yes', 'Yes'], ['no', 'No']] : q.options.map((o) => [o, o]);
+      input = `<select id="${id}"><option value="">Not answered</option>${opts.map(([val, l]) => `<option value="${esc(val)}" ${v === val ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+    } else if (q.type === 'multiselect') {
+      input = `<div class="checks" id="${id}" role="group" aria-label="${esc(q.label)}">${q.options.map((o) => `
+        <label class="check"><input type="checkbox" value="${esc(o)}" ${Array.isArray(v) && v.includes(o) ? 'checked' : ''}><span>${esc(o)}</span></label>`).join('')}</div>`;
+    } else if (q.type === 'textarea') {
+      input = `<textarea id="${id}" maxlength="2000">${esc(v)}</textarea>`;
+    } else {
+      input = `<input id="${id}" maxlength="200" value="${esc(v)}">`;
+    }
+    return `<div class="field">${q.type === 'multiselect' ? `<span class="label">${esc(q.label)}</span>` : `<label for="${id}">${esc(q.label)}</label>`}${input}${help}</div>`;
+  }).join('');
+}
+
+function readQuestionFields(list, prefix) {
+  const out = {};
+  for (const q of list) {
+    const el = document.getElementById(`${prefix}-${q.key}`);
+    if (!el) continue;
+    out[q.key] = q.type === 'multiselect' ? $$('input:checked', el).map((i) => i.value) : el.value;
+  }
+  return out;
+}
+
+// ----- match meter + "See why" calculator -----
+const LEVEL_SHORT = { great: 'great', good: 'good', average: 'average', poor: 'not good', incomplete: 'need info' };
+const STATUS_ICON = { match: '✓', partial: '~', miss: '✕', missing: '?', any: '–' };
+
+function meterHtml(m) {
+  const w = m.score === null ? 100 : Math.max(4, m.score);
+  return `<div class="meter lvl-${esc(m.level)}">
+      <div class="meter-top"><span class="meter-label">${esc(m.label)}</span><span class="meter-score">${m.score === null ? '—' : `${m.score}/100`}</span></div>
+      <div class="meter-bar"><span style="width:${w}%"></span></div>
+    </div>`;
+}
+
+function whyHtml(m) {
+  const price = m.parts.find((x) => x.key === 'price' && x.calc);
+  let calc = '';
+  if (price) {
+    const c = price.calc;
+    calc = `<div class="calc">
+        <p class="calc-title">Price calculator</p>
+        <div class="calc-row"><span>Seller is asking</span><b>${fmtMoney(c.asking)}</b></div>
+        <div class="calc-row"><span>Buyer can spend up to</span><b>${fmtMoney(c.budget)}</b></div>
+        <div class="calc-row total ${c.direction}"><span>${c.direction === 'over' ? 'Over budget by' : c.difference === 0 ? 'Difference' : 'Under budget by'}</span>
+          <b>${fmtMoney(c.difference)} <small>(${c.pctOfBudget.toFixed(1)}% of budget)</small></b></div>
+        ${c.direction === 'over' ? `
+        <div class="calc-row"><span>To close the gap, the buyer adds</span><b>${fmtMoney(c.difference)}</b></div>
+        <div class="calc-row"><span>…or the seller lowers the price by</span><b>${c.sellerDropPct.toFixed(1)}%</b></div>` : ''}
+      </div>`;
+  }
+  const parts = m.parts.map((x) => `
+      <li class="st-${esc(x.status)}"><span class="ic" aria-hidden="true">${STATUS_ICON[x.status] || '–'}</span>
+        <div><b>${esc(x.label)}</b>${x.score !== null ? ` <span class="muted small">${x.score}/100</span>` : ''}
+        <div class="small">${esc(x.text)}</div></div></li>`).join('');
+  let math = '<p class="score-math small">Fill in the missing answers to get a score.</p>';
+  if (m.math) {
+    const raw = Math.round(m.math.lines.reduce((a, l) => a + (l.score * l.weightPct) / 100, 0));
+    math = `<p class="score-math small">Score: ${m.math.lines.map((l) => `${esc(l.label)} ${l.score} × ${l.weightPct}%`).join(' + ')} = <b>${raw}/100</b>
+      ${m.math.capped ? `<br>${esc(m.math.capped)}` : ''}</p>`;
+  }
+  return `${calc}<ul class="why-list">${parts}</ul>${math}`;
+}
+
+let whySeq = 0;
+function matchItem(m, mode) {
+  const id = `why-${++whySeq}`;
+  const L = m.listing;
+  const B = m.buyer;
+  const listingHtml = L ? `
+      <a href="#/property/${L.id}" class="mi-title">${esc(L.address)}</a>
+      <div class="meta small">${[L.type, L.asking !== null ? `Asking ${fmtMoney(L.asking)}` : null].filter(Boolean).map(esc).join(' · ') || 'No listing details yet'}</div>
+      <div class="meta small">Seller <a href="#/client/${L.client_id}">${esc(L.client_name)}</a> · Agent: ${esc(L.agent_name || 'Unassigned')}</div>` : '';
+  const buyerHtml = B ? `
+      <a href="#/client/${B.id}" class="mi-title">${esc(B.name)}</a>
+      <div class="meta small">${[B.budget !== null ? `Budget ${fmtMoney(B.budget)}` : null, B.types.length ? B.types.join(', ') : null].filter(Boolean).map(esc).join(' · ') || 'No buyer answers yet'}</div>
+      <div class="meta small">Buyer's agent: ${esc(B.agent_name || 'Unassigned')}</div>` : '';
+  const head = mode === 'listing' ? listingHtml : mode === 'buyer' ? buyerHtml
+    : `<div class="pair"><div><span class="pair-k">Buyer</span>${buyerHtml}</div><div><span class="pair-k">Property</span>${listingHtml}</div></div>`;
+  return `<li class="match-item lvl-${esc(m.level)}">
+      ${head}
+      ${meterHtml(m)}
+      <button type="button" class="btn small ghost why-btn" data-why="${id}" aria-expanded="false" aria-controls="${id}">See why</button>
+      <div class="why" id="${id}" hidden>${whyHtml(m)}</div>
+    </li>`;
+}
+
+function matchCounts(list) {
+  const c = { great: 0, good: 0, average: 0, poor: 0, incomplete: 0 };
+  list.forEach((m) => { c[m.level] += 1; });
+  return `<div class="match-counts">${Object.keys(c).filter((k) => c[k]).map((k) => `<span class="mc lvl-${k}">${c[k]} ${LEVEL_SHORT[k]}</span>`).join('')}</div>`;
+}
+
+function matchesCard(title, list, mode, emptyMsg) {
+  return `<div class="card" id="matches-card">
+      <h2>${esc(title)} <span class="count">${list.length}</span></h2>
+      ${list.length ? matchCounts(list) : ''}
+      <ul class="match-list">${list.slice(0, 10).map((m) => matchItem(m, mode)).join('') || `<li class="muted">${esc(emptyMsg)}</li>`}</ul>
+      ${list.length > 10 ? `<button class="btn small ghost block" id="show-all-matches">Show all ${list.length}</button>` : ''}
+    </div>`;
+}
+function bindMatchesCard(list, mode) {
+  const b = $('#show-all-matches');
+  if (b) b.addEventListener('click', () => { $('#matches-card .match-list').innerHTML = list.map((m) => matchItem(m, mode)).join(''); b.remove(); });
+}
+
+// One click handler for every "See why" button on any screen.
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-why]');
+  if (!b) return;
+  const el = document.getElementById(b.dataset.why);
+  el.hidden = !el.hidden;
+  b.textContent = el.hidden ? 'See why' : 'Hide';
+  b.setAttribute('aria-expanded', String(!el.hidden));
+});
+
+// ---------- matches page ----------
+const matchState = { level: 'great', mine: false };
+async function viewMatches() {
+  const navAt = navToken;
+  setNav('matches');
+  const q = new URLSearchParams();
+  if (matchState.level) q.set('level', matchState.level);
+  if (matchState.mine) q.set('mine', '1');
+  const d = await api('GET', `/api/matches?${q}`);
+  const all = Object.values(d.counts).reduce((a, b) => a + b, 0);
+  if (navAt !== navToken || !onPage('#/matches')) return;
+  $app.innerHTML = `
+    <p class="kicker">Matching</p>
+    <h1>Buyer ↔ seller matches</h1>
+    <p class="muted small">Every buyer is compared with every property for sale: ${d.buyers} buyer${d.buyers === 1 ? '' : 's'} × ${d.listings} listing${d.listings === 1 ? '' : 's'}.</p>
+    <div class="chips" role="group" aria-label="Match level">
+      ${[['great', 'Great'], ['good', 'Good'], ['average', 'Average'], ['poor', 'Not good'], ['incomplete', 'Need info'], ['', 'All']]
+        .map(([k, l]) => `<button class="chip lvl-chip ${k ? `lvl-${k}` : ''} ${matchState.level === k ? 'on' : ''}" data-l="${k}">${l} (${k ? d.counts[k] : all})</button>`).join('')}
+    </div>
+    <label class="check inline"><input type="checkbox" id="only-mine" ${matchState.mine ? 'checked' : ''}><span>Only matches with my buyers or sellers</span></label>
+    <ul class="match-list">${d.matches.map((m) => matchItem(m, 'pair')).join('') || '<li class="empty">No matches at this level.</li>'}</ul>
+    ${d.total > d.matches.length ? `<p class="muted small">Showing the top ${d.matches.length} of ${d.total}.</p>` : ''}`;
+  $$('.chip[data-l]').forEach((c) => c.addEventListener('click', () => { matchState.level = c.dataset.l; viewMatches(); }));
+  $('#only-mine').addEventListener('change', (e) => { matchState.mine = e.target.checked; viewMatches(); });
+}
+
 // ---------- person profile (buyer / seller) ----------
 let lastClientId = null;
 async function viewClient(id) {
+  const navAt = navToken;
   setNav('search');
   if (lastClientId !== id) { activeTab = 'comments'; lastClientId = id; }
-  const c = await api('GET', `/api/clients/${id}`);
+  const [c, Q, mres] = await Promise.all([api('GET', `/api/clients/${id}`), questions(), api('GET', `/api/clients/${id}/matches`)]);
   const isAdmin = me.role === 'admin';
   const many = c.properties.length > 4;
+  const isBuyer = c.type === 'buyer' || c.type === 'both';
+  const isSeller = c.type === 'seller' || c.type === 'both';
+  const propInfo = (p) => {
+    const d = p.details || {};
+    const bits = [d.listing_status, d.property_type, isEmpty(d.asking_price) ? null : `Asking ${fmtMoney(d.asking_price)}`].filter(Boolean);
+    let counts = '';
+    if (p.for_sale) {
+      const mc = p.match_counts || { great: 0, good: 0 };
+      counts = mc.great || mc.good
+        ? `<span class="mc lvl-great">${mc.great} great</span><span class="mc lvl-good">${mc.good} good</span> <span class="muted small">buyer matches</span>`
+        : isEmpty(d.asking_price) ? '<span class="muted small">Add the asking price to find buyers</span>' : '<span class="muted small">No strong buyer matches yet</span>';
+    }
+    return `${bits.length ? `<span class="small listing-line">${bits.map(esc).join(' · ')}</span>` : ''}${counts ? `<span class="match-counts tight">${counts}</span>` : ''}`;
+  };
 
+  if (navAt !== navToken || !onPage(`#/client/${id}`)) return;
   $app.innerHTML = `
     <a href="#/" class="back">← Back to search</a>
     <div class="card client-head" style="margin-top:8px">
@@ -345,9 +553,20 @@ async function viewClient(id) {
       </div>
     </div>
 
+    ${isBuyer ? `
+    <div class="card" id="buyer-card">
+      <div class="spread"><h2>What they want to buy</h2><button class="btn small ghost" id="edit-buyer">Edit answers</button></div>
+      <div id="buyer-answers">${answersHtml(Q.buyer, c.details, 'No answers yet. Tap "Edit answers" so the app can match this buyer with sellers.')}</div>
+      <form id="buyer-form" hidden style="margin-top:12px">
+        ${questionFields(Q.buyer, c.details, 'bq')}
+        <div class="row"><button class="btn small" type="submit">Save answers</button><button class="btn small ghost" type="button" id="buyer-cancel">Cancel</button></div>
+      </form>
+    </div>
+    ${matchesCard('Matching properties for sale', mres.matches, 'listing', 'No properties for sale yet.')}` : ''}
+
     <div class="card">
       <div class="spread">
-        <h2>Properties / sites <span class="count">${c.properties.length}</span></h2>
+        <h2>${isSeller ? 'Properties / listings' : 'Properties / sites'} <span class="count">${c.properties.length}</span></h2>
         <button class="btn small" id="add-prop">+ Add property</button>
       </div>
       <form id="prop-form" hidden style="margin:12px 0">
@@ -361,6 +580,7 @@ async function viewClient(id) {
           <li data-addr="${esc(p.address.toLowerCase())}">
             <a class="prop-link" href="#/property/${p.id}">
               <span class="addr">${esc(p.address)}</span>
+              ${propInfo(p)}
               ${p.notes ? `<span class="muted small notes">${esc(p.notes)}</span>` : ''}
               <span class="muted small">${p.comment_count} comment${p.comment_count === 1 ? '' : 's'} · ${p.file_count} file${p.file_count === 1 ? '' : 's'}${p.last_comment_at ? ` · last note ${esc(fmtAgo(p.last_comment_at))}` : ''}</span>
             </a>
@@ -384,6 +604,19 @@ async function viewClient(id) {
   `;
 
   bindLog(`/api/clients/${id}`, () => viewClient(id));
+  if (isBuyer) {
+    bindMatchesCard(mres.matches, 'listing');
+    const bf = $('#buyer-form');
+    $('#edit-buyer').addEventListener('click', () => { bf.hidden = false; $('#buyer-answers').hidden = true; $('#edit-buyer').hidden = true; });
+    $('#buyer-cancel').addEventListener('click', () => { bf.hidden = true; $('#buyer-answers').hidden = false; $('#edit-buyer').hidden = false; });
+    bf.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await api('PATCH', `/api/clients/${id}`, { details: readQuestionFields(Q.buyer, 'bq') });
+        toast('Answers saved'); viewClient(id);
+      } catch (err) { toast(err.message, true); }
+    });
+  }
 
   const filter = $('#prop-filter');
   if (filter) filter.addEventListener('input', () => {
@@ -413,11 +646,14 @@ async function viewClient(id) {
 // ---------- property page ----------
 let lastPropId = null;
 async function viewProperty(id) {
+  const navAt = navToken;
   setNav('search');
   if (lastPropId !== id) { activeTab = 'comments'; lastPropId = id; }
-  const p = await api('GET', `/api/properties/${id}`);
+  const [p, Q, mres] = await Promise.all([api('GET', `/api/properties/${id}`), questions(), api('GET', `/api/properties/${id}/matches`)]);
   const isAdmin = me.role === 'admin';
+  const sellerSide = p.client_type === 'seller' || p.client_type === 'both';
 
+  if (navAt !== navToken || !onPage(`#/property/${id}`)) return;
   $app.innerHTML = `
     <a href="#/client/${p.client_id}" class="back">← ${esc(p.client_name)}</a>
     <div class="card client-head" style="margin-top:8px">
@@ -435,18 +671,26 @@ async function viewProperty(id) {
     </div>
 
     <div class="card">
-      <h2>Details</h2>
+      <div class="spread"><h2>${sellerSide ? 'Listing details' : 'Details'}</h2><button class="btn small ghost" id="edit-prop-2">Edit</button></div>
       <form id="prop-form" hidden style="margin:12px 0">
         <div class="field"><label for="p-addr">Address</label><input id="p-addr" required maxlength="300" value="${esc(p.address)}"></div>
+        ${sellerSide ? questionFields(Q.seller, p.details, 'sq') : ''}
         <div class="field"><label for="p-notes">Notes</label><textarea id="p-notes" maxlength="1000">${esc(p.notes)}</textarea></div>
         <div class="row"><button class="btn small" type="submit">Save</button><button class="btn small ghost" type="button" id="p-cancel">Cancel</button></div>
       </form>
-      <ul class="contact-list" id="prop-details">
-        <li><span class="k">Notes</span><span class="v" style="white-space:pre-wrap">${esc(p.notes) || '<span class="muted">—</span>'}</span></li>
-        <li><span class="k">Owner / client</span><span class="v"><a href="#/client/${p.client_id}">${esc(p.client_name)}</a> (${esc(typeLabel[p.client_type])})</span></li>
-        <li><span class="k">Added</span><span class="v">${esc(fmtDate(p.created_at))} by ${esc(p.created_by_name || '—')}</span></li>
-      </ul>
+      <div id="prop-details">
+        ${sellerSide ? answersHtml(Q.seller, p.details, 'No listing details yet. Tap "Edit" and add the asking price and property type so the app can find buyers.') : ''}
+        <ul class="contact-list">
+          <li><span class="k">Notes</span><span class="v" style="white-space:pre-wrap">${esc(p.notes) || '<span class="muted">—</span>'}</span></li>
+          <li><span class="k">Owner / client</span><span class="v"><a href="#/client/${p.client_id}">${esc(p.client_name)}</a> (${esc(typeLabel[p.client_type])})</span></li>
+          <li><span class="k">Added</span><span class="v">${esc(fmtDate(p.created_at))} by ${esc(p.created_by_name || '—')}</span></li>
+        </ul>
+      </div>
     </div>
+
+    ${sellerSide ? (mres.for_sale
+      ? matchesCard('Matching buyers', mres.matches, 'buyer', 'No buyers yet.')
+      : `<div class="card"><h2>Matching buyers</h2><p class="muted">This property is marked "${esc(p.details.listing_status || 'Not for sale')}", so it is not matched with buyers. Set the listing status to "For sale" to see matches.</p></div>`) : ''}
 
     ${renderLog(p, { propTags: false, placeholder: 'e.g. Showed this property to the Gills. They liked the backyard, asked about HOA fees.' })}
 
@@ -454,14 +698,19 @@ async function viewProperty(id) {
   `;
 
   bindLog(`/api/properties/${id}`, () => viewProperty(id));
+  if (sellerSide && mres.for_sale) bindMatchesCard(mres.matches, 'buyer');
 
   const pf = $('#prop-form');
-  $('#edit-prop').addEventListener('click', () => { pf.hidden = false; $('#prop-details').hidden = true; $('#p-addr').focus(); });
+  const openEdit = () => { pf.hidden = false; $('#prop-details').hidden = true; pf.scrollIntoView({ behavior: 'smooth', block: 'start' }); $('#p-addr').focus(); };
+  $('#edit-prop').addEventListener('click', openEdit);
+  $('#edit-prop-2').addEventListener('click', openEdit);
   $('#p-cancel').addEventListener('click', () => { pf.hidden = true; $('#prop-details').hidden = false; });
   pf.addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
-      await api('PATCH', `/api/properties/${id}`, { address: $('#p-addr').value, notes: $('#p-notes').value });
+      const body = { address: $('#p-addr').value, notes: $('#p-notes').value };
+      if (sellerSide) body.details = readQuestionFields(Q.seller, 'sq');
+      await api('PATCH', `/api/properties/${id}`, body);
       toast('Saved'); viewProperty(id);
     } catch (err) { toast(err.message, true); }
   });
@@ -489,9 +738,11 @@ function activityText(a) {
 
 // ---------- new / edit client ----------
 async function viewClientForm(id) {
+  const navAt = navToken;
   setNav(id ? 'search' : 'new');
-  const c = id ? await api('GET', `/api/clients/${id}`) : { type: 'buyer', assigned_agent_id: me.id };
-  const list = await agents();
+  const c = id ? await api('GET', `/api/clients/${id}`) : { type: 'buyer', assigned_agent_id: me.id, details: {} };
+  const [list, Q] = await Promise.all([agents(), questions()]);
+  if (navAt !== navToken || !onPage(id ? `#/client/${id}/edit` : '#/new')) return;
   $app.innerHTML = `
     <a href="${id ? `#/client/${id}` : '#/'}" class="back">← Cancel</a>
     <div class="card" style="margin-top:8px">
@@ -511,10 +762,16 @@ async function viewClientForm(id) {
           <select id="f-agent"><option value="">Unassigned</option>
             ${list.map((a) => `<option value="${a.id}" ${a.id === c.assigned_agent_id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}
           </select></div>
+        <div id="buyer-qs" class="q-section" ${c.type === 'seller' ? 'hidden' : ''}>
+          <h2>What do they want to buy?</h2>
+          <p class="muted small">These answers are used to match this buyer with sellers.</p>
+          ${questionFields(Q.buyer, c.details || {}, 'bq')}
+        </div>
         ${id ? '' : `
         <div class="field"><label>Properties / sites</label>
           <div id="props"></div>
-          <button type="button" class="btn small ghost" id="more-prop">+ Another property</button></div>
+          <button type="button" class="btn small ghost" id="more-prop">+ Another property</button>
+          <span class="help" id="seller-hint" ${c.type === 'buyer' ? 'hidden' : ''}>After saving, open each property to add its asking price and type, so buyers can be matched.</span></div>
         <div class="field"><label for="f-first">First comment (optional)</label>
           <textarea id="f-first" maxlength="5000" placeholder="How did they reach us? What are they looking for?"></textarea></div>`}
         <p class="error" id="form-err"></p>
@@ -525,6 +782,8 @@ async function viewClientForm(id) {
   let type = c.type;
   $$('#type-chips .chip').forEach((b) => b.addEventListener('click', () => {
     type = b.dataset.t; $$('#type-chips .chip').forEach((x) => x.classList.toggle('on', x === b));
+    $('#buyer-qs').hidden = type === 'seller';
+    if ($('#seller-hint')) $('#seller-hint').hidden = type === 'buyer';
   }));
   const addPropRow = () => {
     const row = document.createElement('div');
@@ -545,6 +804,7 @@ async function viewClientForm(id) {
       mailing_address: $('#f-mail').value,
       assigned_agent_id: $('#f-agent').value || null,
     };
+    if (type !== 'seller') body.details = readQuestionFields(Q.buyer, 'bq');
     const btn = $('button[type=submit]', e.target); btn.disabled = true;
     try {
       if (id) {
@@ -563,9 +823,11 @@ async function viewClientForm(id) {
 
 // ---------- admin: team ----------
 async function viewAdmin() {
+  const navAt = navToken;
   setNav('admin');
   if (me.role !== 'admin') { $app.innerHTML = '<div class="empty">Admins only.</div>'; return; }
   const users = await api('GET', '/api/admin/users');
+  if (navAt !== navToken || !onPage('#/admin')) return;
   $app.innerHTML = `
     <div class="spread"><h1>Team logins</h1><button class="btn small" id="add-user">+ Add employee</button></div>
     <p class="muted small">${users.filter((u) => u.active).length} active employees. Turning someone off logs them out right away and keeps their comment history.</p>

@@ -114,6 +114,9 @@ for (const t of ['comments', 'files', 'activity']) {
   addColumn(t, 'property_id', 'INTEGER REFERENCES properties(id) ON DELETE SET NULL');
   db.exec(`CREATE INDEX IF NOT EXISTS idx_${t}_property ON ${t}(property_id)`);
 }
+// Answers to the buyer / seller questions (see src/questions.js), stored as JSON.
+addColumn('clients', 'details', "TEXT NOT NULL DEFAULT '{}'");
+addColumn('properties', 'details', "TEXT NOT NULL DEFAULT '{}'");
 
 function logActivity(clientId, userId, action, detail, propertyId = null) {
   db.prepare('INSERT INTO activity (client_id, user_id, action, detail, property_id) VALUES (?,?,?,?,?)')

@@ -10,6 +10,8 @@ const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const { db, UPLOAD_DIR, logActivity } = require('./src/db');
 const SqliteStore = require('./src/sessionStore');
+const match = require('./src/match');
+const { LEVELS } = require('./src/questions');
 
 const PORT = process.env.PORT || 3000;
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -218,14 +220,17 @@ app.post('/api/clients', requireAuth, (req, res) => {
   if (!c.name) return fail(res, 400, 'Name is required');
   if (!c.type) return fail(res, 400, 'Choose buyer, seller or both');
   const tx = db.transaction(() => {
-    const r = db.prepare(`INSERT INTO clients (type, name, phone, phone_digits, email, mailing_address, assigned_agent_id, created_by)
-      VALUES (?,?,?,?,?,?,?,?)`).run(c.type, c.name, c.phone, digits(c.phone), c.email, c.mailing_address, c.assigned_agent_id, req.user.id);
+    const details = c.type === 'seller' ? {} : match.cleanDetails(match.BUYER_QUESTIONS, req.body.details);
+    const r = db.prepare(`INSERT INTO clients (type, name, phone, phone_digits, email, mailing_address, assigned_agent_id, created_by, details)
+      VALUES (?,?,?,?,?,?,?,?,?)`).run(c.type, c.name, c.phone, digits(c.phone), c.email, c.mailing_address, c.assigned_agent_id, req.user.id, JSON.stringify(details));
     const id = r.lastInsertRowid;
     const props = Array.isArray(req.body.properties) ? req.body.properties : [];
     for (const p of props.slice(0, 50)) {
       const address = clean(p && p.address, 300);
-      if (address) db.prepare('INSERT INTO properties (client_id, address, notes, created_by) VALUES (?,?,?,?)')
-        .run(id, address, clean(p.notes, 1000), req.user.id);
+      const pd = match.cleanDetails(match.SELLER_QUESTIONS, p && p.details);
+      if (!pd.listing_status) pd.listing_status = c.type === 'buyer' ? 'Not for sale' : 'For sale';
+      if (address) db.prepare('INSERT INTO properties (client_id, address, notes, created_by, details) VALUES (?,?,?,?,?)')
+        .run(id, address, clean(p.notes, 1000), req.user.id, JSON.stringify(pd));
     }
     logActivity(id, req.user.id, 'created', `Added ${c.type} "${c.name}"`);
     return id;
@@ -248,6 +253,22 @@ app.get('/api/clients/:id', requireAuth, (req, res) => {
       (SELECT COUNT(*) FROM files f WHERE f.property_id = p.id) AS file_count,
       (SELECT MAX(created_at) FROM comments m WHERE m.property_id = p.id) AS last_comment_at
     FROM properties p LEFT JOIN users u ON u.id = p.created_by WHERE p.client_id = ? ORDER BY p.id`).all(id);
+  client.details = match.parseDetails(client.details);
+  const buyers = match.loadBuyers(db);
+  for (const p of client.properties) {
+    p.details = match.parseDetails(p.details);
+    p.for_sale = ['seller', 'both'].includes(client.type) && match.isForSale(p);
+    if (p.for_sale) {
+      const listing = { ...p, details: p.details };
+      const counts = { great: 0, good: 0 };
+      for (const b of buyers) {
+        if (b.id === client.id) continue;
+        const m = match.compare(b, listing);
+        if (m.level in counts) counts[m.level] += 1;
+      }
+      p.match_counts = counts;
+    }
+  }
   Object.assign(client, timeline('client_id', id));
   res.json(client);
 });
@@ -275,10 +296,14 @@ app.patch('/api/clients/:id', requireAuth, (req, res) => {
   if (!c.type) return fail(res, 400, 'Choose buyer, seller or both');
   const labels = { type: 'Type', name: 'Name', phone: 'Phone', email: 'Email', mailing_address: 'Mailing address', assigned_agent_id: 'Assigned agent' };
   const changed = Object.keys(labels).filter((k) => String(c[k] ?? '') !== String(existing[k] ?? ''));
-  if (!changed.length) return res.json({ ok: true });
-  db.prepare(`UPDATE clients SET type=?, name=?, phone=?, phone_digits=?, email=?, mailing_address=?, assigned_agent_id=?, updated_at=? WHERE id=?`)
-    .run(c.type, c.name, c.phone, digits(c.phone), c.email, c.mailing_address, c.assigned_agent_id, now(), existing.id);
-  logActivity(existing.id, req.user.id, 'edited', `Changed: ${changed.map((k) => labels[k]).join(', ')}`);
+  const oldDetails = match.parseDetails(existing.details);
+  const newDetails = req.body.details !== undefined ? match.cleanDetails(match.BUYER_QUESTIONS, req.body.details, oldDetails) : oldDetails;
+  const changedAnswers = match.changedLabels(match.BUYER_QUESTIONS, oldDetails, newDetails);
+  if (!changed.length && !changedAnswers.length) return res.json({ ok: true });
+  db.prepare(`UPDATE clients SET type=?, name=?, phone=?, phone_digits=?, email=?, mailing_address=?, assigned_agent_id=?, details=?, updated_at=? WHERE id=?`)
+    .run(c.type, c.name, c.phone, digits(c.phone), c.email, c.mailing_address, c.assigned_agent_id, JSON.stringify(newDetails), now(), existing.id);
+  if (changed.length) logActivity(existing.id, req.user.id, 'edited', `Changed: ${changed.map((k) => labels[k]).join(', ')}`);
+  if (changedAnswers.length) logActivity(existing.id, req.user.id, 'edited', `Updated buyer answers: ${changedAnswers.join(', ')}`);
   res.json({ ok: true });
 });
 
@@ -297,8 +322,10 @@ app.post('/api/clients/:id/properties', requireAuth, (req, res) => {
   if (!c) return fail(res, 404, 'Client not found');
   const address = clean(req.body.address, 300);
   if (!address) return fail(res, 400, 'Address is required');
-  const r = db.prepare('INSERT INTO properties (client_id, address, notes, created_by) VALUES (?,?,?,?)')
-    .run(c.id, address, clean(req.body.notes, 1000), req.user.id);
+  const pd = match.cleanDetails(match.SELLER_QUESTIONS, req.body.details);
+  if (!pd.listing_status) pd.listing_status = c.type === 'buyer' ? 'Not for sale' : 'For sale';
+  const r = db.prepare('INSERT INTO properties (client_id, address, notes, created_by, details) VALUES (?,?,?,?,?)')
+    .run(c.id, address, clean(req.body.notes, 1000), req.user.id, JSON.stringify(pd));
   db.prepare('UPDATE clients SET updated_at = ? WHERE id = ?').run(now(), c.id);
   logActivity(c.id, req.user.id, 'property_added', address, r.lastInsertRowid);
   res.json({ id: r.lastInsertRowid });
@@ -311,6 +338,8 @@ app.get('/api/properties/:id', requireAuth, (req, res) => {
     FROM properties p JOIN clients c ON c.id = p.client_id LEFT JOIN users u ON u.id = p.created_by
     WHERE p.id = ?`).get(Number(req.params.id));
   if (!p) return fail(res, 404, 'Property not found');
+  p.details = match.parseDetails(p.details);
+  p.for_sale = ['seller', 'both'].includes(p.client_type) && match.isForSale(p);
   Object.assign(p, timeline('property_id', p.id));
   res.json(p);
 });
@@ -321,9 +350,15 @@ app.patch('/api/properties/:id', requireAuth, (req, res) => {
   const address = req.body.address !== undefined ? clean(req.body.address, 300) : p.address;
   const notes = req.body.notes !== undefined ? clean(req.body.notes, 1000) : p.notes;
   if (!address) return fail(res, 400, 'Address is required');
-  db.prepare('UPDATE properties SET address = ?, notes = ? WHERE id = ?').run(address, notes, p.id);
+  const oldDetails = match.parseDetails(p.details);
+  const newDetails = req.body.details !== undefined ? match.cleanDetails(match.SELLER_QUESTIONS, req.body.details, oldDetails) : oldDetails;
+  const changedAnswers = match.changedLabels(match.SELLER_QUESTIONS, oldDetails, newDetails);
+  db.prepare('UPDATE properties SET address = ?, notes = ?, details = ? WHERE id = ?').run(address, notes, JSON.stringify(newDetails), p.id);
   db.prepare('UPDATE clients SET updated_at = ? WHERE id = ?').run(now(), p.client_id);
-  logActivity(p.client_id, req.user.id, 'property_edited', address === p.address ? address : `${p.address} → ${address}`, p.id);
+  if (address !== p.address || notes !== p.notes) {
+    logActivity(p.client_id, req.user.id, 'property_edited', address === p.address ? address : `${p.address} → ${address}`, p.id);
+  }
+  if (changedAnswers.length) logActivity(p.client_id, req.user.id, 'property_edited', `${address}: updated ${changedAnswers.join(', ')}`, p.id);
   res.json({ ok: true });
 });
 
@@ -354,6 +389,57 @@ app.post('/api/properties/:id/comments', requireAuth, (req, res) => {
   const p = db.prepare('SELECT * FROM properties WHERE id = ?').get(Number(req.params.id));
   if (!p) return fail(res, 404, 'Property not found');
   addComment(req, res, p.client_id, p.id);
+});
+
+// ---------- questions & matching ----------
+app.get('/api/questions', requireAuth, (req, res) => {
+  res.json({ seller: match.SELLER_QUESTIONS, buyer: match.BUYER_QUESTIONS, levels: LEVELS });
+});
+
+// All properties for sale, ranked for one buyer.
+app.get('/api/clients/:id/matches', requireAuth, (req, res) => {
+  const c = getClient(req.params.id);
+  if (!c) return fail(res, 404, 'Client not found');
+  if (!['buyer', 'both'].includes(c.type)) return res.json({ buyer: false, matches: [] });
+  const buyer = match.loadBuyers(db).find((b) => b.id === c.id);
+  const out = match.loadListings(db).filter((l) => l.client_id !== c.id)
+    .map((l) => ({ listing: match.listingSummary(l), ...match.compare(buyer, l) }))
+    .sort(match.sortMatches);
+  res.json({ buyer: true, matches: out });
+});
+
+// All buyers, ranked for one property.
+app.get('/api/properties/:id/matches', requireAuth, (req, res) => {
+  const listing = match.loadListings(db).find((l) => l.id === Number(req.params.id));
+  if (!listing) return res.json({ for_sale: false, matches: [] });
+  const out = match.loadBuyers(db).filter((b) => b.id !== listing.client_id)
+    .map((b) => ({ buyer: match.buyerSummary(b), ...match.compare(b, listing) }))
+    .sort(match.sortMatches);
+  res.json({ for_sale: true, matches: out });
+});
+
+// Every buyer x every listing, for the Matches page.
+app.get('/api/matches', requireAuth, (req, res) => {
+  const level = ['great', 'good', 'average', 'poor', 'incomplete'].includes(req.query.level) ? req.query.level : '';
+  const mine = req.query.mine === '1';
+  const buyers = match.loadBuyers(db);
+  const listings = match.loadListings(db);
+  const counts = { great: 0, good: 0, average: 0, poor: 0, incomplete: 0 };
+  let rows = [];
+  for (const b of buyers) {
+    for (const l of listings) {
+      if (b.id === l.client_id) continue;
+      const m = match.compare(b, l);
+      if (mine && b.assigned_agent_id !== req.user.id && l.assigned_agent_id !== req.user.id) continue;
+      counts[m.level] += 1;
+      if (level && m.level !== level) continue;
+      rows.push({ buyer: match.buyerSummary(b), listing: match.listingSummary(l), ...m });
+    }
+  }
+  rows.sort(match.sortMatches);
+  const total = rows.length;
+  rows = rows.slice(0, 300);
+  res.json({ counts, total, buyers: buyers.length, listings: listings.length, matches: rows });
 });
 
 // ---------- files ----------

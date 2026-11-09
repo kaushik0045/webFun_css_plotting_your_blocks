@@ -51,6 +51,19 @@ jrp-app/
 
 ---
 
+## Buyer & seller questions and matching
+
+- **Questions** live in one file: `src/questions.js`. `BUYER_QUESTIONS` are asked once per buyer; `SELLER_QUESTIONS` are asked for each property a seller lists. Add, remove or reword questions there; the forms update automatically.
+- **Matching** compares every buyer with every property whose listing status is "For sale" and scores it 0–100:
+  - Price vs budget (55%): within budget = 100; each 1% over budget takes 5 points off.
+  - Property type (25%): if the buyer picked types and this isn't one, the whole score is capped at 30.
+  - Location (10%) and building size (10%) count only when the buyer has a preference.
+  - **Great** 85+, **Good** 70–84, **Average** 50–69, **Not a good match** under 50, **Not enough info** when a price or budget is missing.
+- **See why** shows the price calculator (difference in dollars and %, how much the buyer would need to add, or how much the seller would need to drop) and how each rule scored.
+- Change the weights and bands in `MATCH_RULES` and `LEVELS` at the bottom of `src/questions.js`.
+
+---
+
 ## Part 2: Run it on your own computer
 
 1. Install **Node.js 22.13 or newer** from https://nodejs.org (the LTS version is fine).
