@@ -79,6 +79,14 @@ To test on your phone while it's on the same Wi-Fi, open `http://YOUR-COMPUTER-I
 
 ---
 
+## Before going live: checklist
+
+- [ ] **Google Sheets live sync**: copy every client, property, comment and history entry into a Google Sheet automatically (needs a one-time Google account connection).
+- [ ] Create real employee logins (no demo data on the live app).
+- [ ] Choose the web address (for example `clients.yourdomain.com`).
+
+---
+
 ## Part 3: Put it live on Render (recommended)
 
 Render runs the app 24/7 with a secure `https://` link. Cost: **Starter plan (~$7/month) + 5 GB disk (~$1.25/month)**. The disk is required because it's where the database and uploaded files are kept.
