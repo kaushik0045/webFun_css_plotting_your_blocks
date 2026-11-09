@@ -356,3 +356,13 @@ h2 .count {
 .prompt-1031 { border: 2px solid var(--red); background: linear-gradient(180deg, rgba(225, 6, 0, .14), var(--ink)); }
 .prompt-1031 h2 { font-size: 1.05rem; }
 .prompt-1031 p { color: #dcdce0; }
+
+/* show / hide password */
+.pw-wrap { position: relative; }
+.pw-wrap input { padding-right: 76px; }
+.pw-toggle {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  background: none; border: 0; cursor: pointer; padding: 8px 10px;
+  font: 700 .68rem/1 var(--head); letter-spacing: .12em; text-transform: uppercase; color: #55555c;
+}
+.pw-toggle:hover { color: var(--red); }

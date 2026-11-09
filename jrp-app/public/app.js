@@ -119,12 +119,23 @@ function viewLogin() {
           <div class="field"><label for="email">Email</label>
             <input id="email" name="email" type="email" autocomplete="username" required autofocus></div>
           <div class="field"><label for="password">Password</label>
-            <input id="password" name="password" type="password" autocomplete="current-password" required></div>
+            <div class="pw-wrap">
+              <input id="password" name="password" type="password" autocomplete="current-password" required>
+              <button type="button" class="pw-toggle" id="pw-toggle" aria-label="Show password" aria-pressed="false">Show</button>
+            </div></div>
           <p class="error" id="login-err"></p>
           <button class="btn block" type="submit">Log in</button>
         </form>
       </div>
     </div>`;
+  $('#pw-toggle').addEventListener('click', () => {
+    const pw = $('#password');
+    const show = pw.type === 'password';
+    pw.type = show ? 'text' : 'password';
+    $('#pw-toggle').textContent = show ? 'Hide' : 'Show';
+    $('#pw-toggle').setAttribute('aria-pressed', String(show));
+    $('#pw-toggle').setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+  });
   $('#login-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = $('button', e.target);
