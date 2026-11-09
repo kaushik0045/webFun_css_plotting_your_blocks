@@ -238,16 +238,29 @@ app.get('/api/clients/:id', requireAuth, (req, res) => {
     WHERE c.id = ?`).get(id);
   if (!client) return fail(res, 404, 'Client not found');
   delete client.phone_digits;
-  client.properties = db.prepare(`SELECT p.*, u.name AS created_by_name FROM properties p
-    LEFT JOIN users u ON u.id = p.created_by WHERE p.client_id = ? ORDER BY p.id`).all(id);
-  client.comments = db.prepare(`SELECT m.id, m.body, m.created_at, u.name AS author
-    FROM comments m LEFT JOIN users u ON u.id = m.user_id WHERE m.client_id = ? ORDER BY m.created_at DESC, m.id DESC`).all(id);
-  client.files = db.prepare(`SELECT f.id, f.original_name, f.mime, f.size, f.created_at, u.name AS uploaded_by
-    FROM files f LEFT JOIN users u ON u.id = f.user_id WHERE f.client_id = ? ORDER BY f.id DESC`).all(id);
-  client.activity = db.prepare(`SELECT a.action, a.detail, a.created_at, u.name AS user_name
-    FROM activity a LEFT JOIN users u ON u.id = a.user_id WHERE a.client_id = ? ORDER BY a.created_at DESC, a.id DESC LIMIT 200`).all(id);
+  client.properties = db.prepare(`SELECT p.*, u.name AS created_by_name,
+      (SELECT COUNT(*) FROM comments m WHERE m.property_id = p.id) AS comment_count,
+      (SELECT COUNT(*) FROM files f WHERE f.property_id = p.id) AS file_count,
+      (SELECT MAX(created_at) FROM comments m WHERE m.property_id = p.id) AS last_comment_at
+    FROM properties p LEFT JOIN users u ON u.id = p.created_by WHERE p.client_id = ? ORDER BY p.id`).all(id);
+  Object.assign(client, timeline('client_id', id));
   res.json(client);
 });
+
+// Comments, files and history for a client (all of them) or for one property.
+function timeline(column, id) {
+  return {
+    comments: db.prepare(`SELECT m.id, m.body, m.created_at, m.property_id, p.address AS property_address, u.name AS author
+      FROM comments m LEFT JOIN users u ON u.id = m.user_id LEFT JOIN properties p ON p.id = m.property_id
+      WHERE m.${column} = ? ORDER BY m.created_at DESC, m.id DESC`).all(id),
+    files: db.prepare(`SELECT f.id, f.original_name, f.mime, f.size, f.created_at, f.property_id, p.address AS property_address, u.name AS uploaded_by
+      FROM files f LEFT JOIN users u ON u.id = f.user_id LEFT JOIN properties p ON p.id = f.property_id
+      WHERE f.${column} = ? ORDER BY f.id DESC`).all(id),
+    activity: db.prepare(`SELECT a.action, a.detail, a.created_at, a.property_id, u.name AS user_name
+      FROM activity a LEFT JOIN users u ON u.id = a.user_id
+      WHERE a.${column} = ? ORDER BY a.created_at DESC, a.id DESC LIMIT 200`).all(id),
+  };
+}
 
 app.patch('/api/clients/:id', requireAuth, (req, res) => {
   const existing = getClient(req.params.id);
@@ -279,11 +292,22 @@ app.post('/api/clients/:id/properties', requireAuth, (req, res) => {
   if (!c) return fail(res, 404, 'Client not found');
   const address = clean(req.body.address, 300);
   if (!address) return fail(res, 400, 'Address is required');
-  db.prepare('INSERT INTO properties (client_id, address, notes, created_by) VALUES (?,?,?,?)')
+  const r = db.prepare('INSERT INTO properties (client_id, address, notes, created_by) VALUES (?,?,?,?)')
     .run(c.id, address, clean(req.body.notes, 1000), req.user.id);
   db.prepare('UPDATE clients SET updated_at = ? WHERE id = ?').run(now(), c.id);
-  logActivity(c.id, req.user.id, 'property_added', address);
-  res.json({ ok: true });
+  logActivity(c.id, req.user.id, 'property_added', address, r.lastInsertRowid);
+  res.json({ id: r.lastInsertRowid });
+});
+
+// One property's own page: details, owner, and its comments, files and history.
+app.get('/api/properties/:id', requireAuth, (req, res) => {
+  const p = db.prepare(`SELECT p.*, u.name AS created_by_name, c.name AS client_name, c.type AS client_type,
+      c.phone AS client_phone, c.email AS client_email
+    FROM properties p JOIN clients c ON c.id = p.client_id LEFT JOIN users u ON u.id = p.created_by
+    WHERE p.id = ?`).get(Number(req.params.id));
+  if (!p) return fail(res, 404, 'Property not found');
+  Object.assign(p, timeline('property_id', p.id));
+  res.json(p);
 });
 
 app.patch('/api/properties/:id', requireAuth, (req, res) => {
@@ -294,7 +318,7 @@ app.patch('/api/properties/:id', requireAuth, (req, res) => {
   if (!address) return fail(res, 400, 'Address is required');
   db.prepare('UPDATE properties SET address = ?, notes = ? WHERE id = ?').run(address, notes, p.id);
   db.prepare('UPDATE clients SET updated_at = ? WHERE id = ?').run(now(), p.client_id);
-  logActivity(p.client_id, req.user.id, 'property_edited', address === p.address ? address : `${p.address} → ${address}`);
+  logActivity(p.client_id, req.user.id, 'property_edited', address === p.address ? address : `${p.address} → ${address}`, p.id);
   res.json({ ok: true });
 });
 
@@ -307,15 +331,24 @@ app.delete('/api/properties/:id', requireAuth, requireAdmin, (req, res) => {
 });
 
 // ---------- comments / remarks ----------
-app.post('/api/clients/:id/comments', requireAuth, (req, res) => {
-  const c = getClient(req.params.id);
-  if (!c) return fail(res, 404, 'Client not found');
+function addComment(req, res, clientId, propertyId) {
   const body = clean(req.body.body, 5000);
   if (!body) return fail(res, 400, 'Comment is empty');
   const t = now();
-  db.prepare('INSERT INTO comments (client_id, user_id, body, created_at) VALUES (?,?,?,?)').run(c.id, req.user.id, body, t);
-  db.prepare('UPDATE clients SET updated_at = ? WHERE id = ?').run(t, c.id);
+  db.prepare('INSERT INTO comments (client_id, property_id, user_id, body, created_at) VALUES (?,?,?,?,?)')
+    .run(clientId, propertyId, req.user.id, body, t);
+  db.prepare('UPDATE clients SET updated_at = ? WHERE id = ?').run(t, clientId);
   res.json({ ok: true });
+}
+app.post('/api/clients/:id/comments', requireAuth, (req, res) => {
+  const c = getClient(req.params.id);
+  if (!c) return fail(res, 404, 'Client not found');
+  addComment(req, res, c.id, null);
+});
+app.post('/api/properties/:id/comments', requireAuth, (req, res) => {
+  const p = db.prepare('SELECT * FROM properties WHERE id = ?').get(Number(req.params.id));
+  if (!p) return fail(res, 404, 'Property not found');
+  addComment(req, res, p.client_id, p.id);
 });
 
 // ---------- files ----------
@@ -327,22 +360,30 @@ const upload = multer({
   limits: { fileSize: MAX_UPLOAD_MB * 1024 * 1024, files: 10 },
 });
 
-app.post('/api/clients/:id/files', requireAuth, (req, res) => {
-  const c = getClient(req.params.id);
-  if (!c) return fail(res, 404, 'Client not found');
+function handleUpload(req, res, clientId, propertyId) {
   upload.array('files', 10)(req, res, (err) => {
     if (err) return fail(res, 400, err.code === 'LIMIT_FILE_SIZE' ? `Each file must be under ${MAX_UPLOAD_MB} MB` : 'Upload failed');
     const files = req.files || [];
     if (!files.length) return fail(res, 400, 'No file selected');
-    const ins = db.prepare('INSERT INTO files (client_id, user_id, original_name, stored_name, mime, size) VALUES (?,?,?,?,?,?)');
+    const ins = db.prepare('INSERT INTO files (client_id, property_id, user_id, original_name, stored_name, mime, size) VALUES (?,?,?,?,?,?,?)');
     for (const f of files) {
       const name = Buffer.from(f.originalname, 'latin1').toString('utf8').slice(0, 200);
-      ins.run(c.id, req.user.id, name, f.filename, f.mimetype, f.size);
-      logActivity(c.id, req.user.id, 'file_uploaded', name);
+      ins.run(clientId, propertyId, req.user.id, name, f.filename, f.mimetype, f.size);
+      logActivity(clientId, req.user.id, 'file_uploaded', name, propertyId);
     }
-    db.prepare('UPDATE clients SET updated_at = ? WHERE id = ?').run(now(), c.id);
+    db.prepare('UPDATE clients SET updated_at = ? WHERE id = ?').run(now(), clientId);
     res.json({ ok: true });
   });
+}
+app.post('/api/clients/:id/files', requireAuth, (req, res) => {
+  const c = getClient(req.params.id);
+  if (!c) return fail(res, 404, 'Client not found');
+  handleUpload(req, res, c.id, null);
+});
+app.post('/api/properties/:id/files', requireAuth, (req, res) => {
+  const p = db.prepare('SELECT * FROM properties WHERE id = ?').get(Number(req.params.id));
+  if (!p) return fail(res, 404, 'Property not found');
+  handleUpload(req, res, p.client_id, p.id);
 });
 
 app.get('/api/files/:id', requireAuth, (req, res) => {
@@ -362,7 +403,7 @@ app.delete('/api/files/:id', requireAuth, requireAdmin, (req, res) => {
   if (!f) return fail(res, 404, 'File not found');
   db.prepare('DELETE FROM files WHERE id = ?').run(f.id);
   fs.rm(path.join(UPLOAD_DIR, f.stored_name), { force: true }, () => {});
-  logActivity(f.client_id, req.user.id, 'file_removed', f.original_name);
+  logActivity(f.client_id, req.user.id, 'file_removed', f.original_name, f.property_id);
   res.json({ ok: true });
 });
 

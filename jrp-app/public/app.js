@@ -86,6 +86,7 @@ async function route() {
     if (parts[0] === 'new') return viewClientForm(null);
     if (parts[0] === 'client' && parts[1] && parts[2] === 'edit') return viewClientForm(Number(parts[1]));
     if (parts[0] === 'client' && parts[1]) return viewClient(Number(parts[1]));
+    if (parts[0] === 'property' && parts[1]) return viewProperty(Number(parts[1]));
     if (parts[0] === 'admin') return viewAdmin();
     if (parts[0] === 'account') return viewAccount();
     $app.innerHTML = '<div class="empty">Page not found. <a href="#/">Go to search</a></div>';
@@ -184,18 +185,115 @@ async function runSearch() {
     : `<li class="empty">No matches. <a href="#/new">Add a new buyer or seller</a></li>`;
 }
 
-// ---------- client detail ----------
-let clientTab = 'comments';
+// ---------- shared: comments / history / files block ----------
+// Used on both the person's profile (everything) and a property page (just that property).
+let activeTab = 'comments';
+
+function renderLog(d, { propTags, placeholder }) {
+  const isAdmin = me.role === 'admin';
+  const tag = (x) => (propTags && x.property_id
+    ? `<a class="prop-tag" href="#/property/${x.property_id}">${esc(x.property_address || 'Property')}</a>` : '');
+  const history = [
+    ...d.comments.map((m) => ({ t: m.created_at, who: m.author || 'Former employee', body: m.body, kind: 'comment', x: m })),
+    ...d.activity.map((a) => ({ t: a.created_at, who: a.user_name || 'Former employee', body: activityText(a), kind: 'sys', x: {} })),
+  ].sort((a, b) => (a.t < b.t ? 1 : -1));
+
+  return `
+    <div class="card">
+      <div class="tabs" role="tablist">
+        <button class="tab" data-tab="comments" role="tab">Comments (${d.comments.length})</button>
+        <button class="tab" data-tab="history" role="tab">Full history</button>
+        <button class="tab" data-tab="files" role="tab">Files (${d.files.length})</button>
+      </div>
+
+      <section data-panel="comments">
+        <form id="comment-form">
+          <label for="comment">What happened? (call, meeting, showing, offer…)</label>
+          <textarea id="comment" maxlength="5000" required placeholder="${esc(placeholder)}"></textarea>
+          <div class="spread" style="margin-top:8px">
+            <span class="muted small">Saved with your name and the current date &amp; time.</span>
+            <button class="btn" type="submit">Save comment</button>
+          </div>
+        </form>
+        <ul class="timeline" style="margin-top:14px">
+          ${d.comments.length ? d.comments.map((m) => `
+            <li><span class="who">${esc(m.author || 'Former employee')}</span>
+              <span class="when"> · ${esc(fmtDate(m.created_at))}</span> ${tag(m)}
+              <div class="body">${esc(m.body)}</div></li>`).join('') : '<li class="sys muted">No comments yet.</li>'}
+        </ul>
+      </section>
+
+      <section data-panel="history">
+        <p class="muted small">Every comment and change, recorded automatically.</p>
+        <ul class="timeline">
+          ${history.map((h) => `
+            <li class="${h.kind === 'sys' ? 'sys' : ''}"><span class="who">${esc(h.who)}</span>
+              <span class="when"> · ${esc(fmtDate(h.t))}</span> ${tag(h.x)}
+              <div class="body ${h.kind === 'sys' ? 'muted small' : ''}">${esc(h.body)}</div></li>`).join('')}
+        </ul>
+      </section>
+
+      <section data-panel="files">
+        <form id="file-form" class="row" style="margin-bottom:10px">
+          <input type="file" id="file-input" multiple style="flex:1;min-width:200px">
+          <button class="btn" type="submit">Upload</button>
+        </form>
+        ${d.files.length ? d.files.map((f) => `
+          <div class="file">
+            <div><a href="/api/files/${f.id}?view=1" target="_blank" rel="noopener">${esc(f.original_name)}</a>
+              <div class="muted small">${esc(fmtSize(f.size))} · ${esc(f.uploaded_by || '—')} · ${esc(fmtDate(f.created_at))} ${tag(f)}</div></div>
+            <div class="row">
+              <a class="btn small ghost" href="/api/files/${f.id}">Download</a>
+              ${isAdmin ? `<button class="btn small danger" data-del-file="${f.id}">Delete</button>` : ''}
+            </div>
+          </div>`).join('') : '<p class="muted">No files yet.</p>'}
+      </section>
+    </div>`;
+}
+
+function bindLog(baseUrl, reload) {
+  const showTab = (t) => {
+    activeTab = t;
+    $$('.tab').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
+    $$('[data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== t; });
+  };
+  $$('.tab').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
+  showTab(activeTab);
+
+  $('#comment-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('button[type=submit]', e.target); btn.disabled = true;
+    try {
+      await api('POST', `${baseUrl}/comments`, { body: $('#comment').value });
+      toast('Comment saved'); activeTab = 'comments'; reload();
+    } catch (err) { toast(err.message, true); btn.disabled = false; }
+  });
+
+  $('#file-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const files = $('#file-input').files;
+    if (!files.length) return toast('Choose a file first', true);
+    const fd = new FormData();
+    for (const f of files) fd.append('files', f);
+    const btn = $('button', e.target); btn.disabled = true; btn.textContent = 'Uploading…';
+    try { await api('POST', `${baseUrl}/files`, fd); toast('Uploaded'); activeTab = 'files'; reload(); }
+    catch (err) { toast(err.message, true); btn.disabled = false; btn.textContent = 'Upload'; }
+  });
+  $$('[data-del-file]').forEach((b) => b.addEventListener('click', async () => {
+    if (!confirm('Delete this file permanently?')) return;
+    try { await api('DELETE', `/api/files/${b.dataset.delFile}`); toast('Deleted'); reload(); }
+    catch (err) { toast(err.message, true); }
+  }));
+}
+
+// ---------- person profile (buyer / seller) ----------
+let lastClientId = null;
 async function viewClient(id) {
   setNav('search');
+  if (lastClientId !== id) { activeTab = 'comments'; lastClientId = id; }
   const c = await api('GET', `/api/clients/${id}`);
   const isAdmin = me.role === 'admin';
-
-  // History = comments + automatic activity, newest first.
-  const history = [
-    ...c.comments.map((m) => ({ t: m.created_at, who: m.author || 'Former employee', body: m.body, kind: 'comment' })),
-    ...c.activity.map((a) => ({ t: a.created_at, who: a.user_name || 'Former employee', body: activityText(a), kind: 'sys' })),
-  ].sort((a, b) => (a.t < b.t ? 1 : -1));
+  const many = c.properties.length > 4;
 
   $app.innerHTML = `
     <a href="#/" class="back">← Back to search</a>
@@ -215,6 +313,29 @@ async function viewClient(id) {
     </div>
 
     <div class="card">
+      <div class="spread">
+        <h2>Properties / sites <span class="count">${c.properties.length}</span></h2>
+        <button class="btn small" id="add-prop">+ Add property</button>
+      </div>
+      <form id="prop-form" hidden style="margin:12px 0">
+        <div class="field"><label for="p-addr">Address</label><input id="p-addr" required maxlength="300" placeholder="123 Main St, Modesto, CA"></div>
+        <div class="field"><label for="p-notes">Notes (optional)</label><input id="p-notes" maxlength="1000" placeholder="e.g. 3 bed / 2 bath, listing price, lot size"></div>
+        <div class="row"><button class="btn small" type="submit">Save property</button><button class="btn small ghost" type="button" id="p-cancel">Cancel</button></div>
+      </form>
+      ${many ? '<input id="prop-filter" type="search" placeholder="Find a property by address" aria-label="Find a property" style="margin-top:12px">' : ''}
+      <ul class="prop-list" id="prop-list">
+        ${c.properties.length ? c.properties.map((p) => `
+          <li data-addr="${esc(p.address.toLowerCase())}">
+            <a class="prop-link" href="#/property/${p.id}">
+              <span class="addr">${esc(p.address)}</span>
+              ${p.notes ? `<span class="muted small notes">${esc(p.notes)}</span>` : ''}
+              <span class="muted small">${p.comment_count} comment${p.comment_count === 1 ? '' : 's'} · ${p.file_count} file${p.file_count === 1 ? '' : 's'}${p.last_comment_at ? ` · last note ${esc(fmtAgo(p.last_comment_at))}` : ''}</span>
+            </a>
+          </li>`).join('') : '<li class="muted" style="padding:12px 0">No properties yet. Tap <b>+ Add property</b>.</li>'}
+      </ul>
+    </div>
+
+    <div class="card">
       <h2>Contact info</h2>
       <ul class="contact-list">
         <li><span class="k">Phone</span><span class="v">${c.phone ? `<a href="${esc(telUrl(c.phone))}">${esc(c.phone)}</a>` : '<span class="muted">—</span>'}</span></li>
@@ -224,151 +345,98 @@ async function viewClient(id) {
       </ul>
     </div>
 
-    <div class="card">
-      <div class="spread"><h2>Properties / sites (${c.properties.length})</h2>
-        <button class="btn small" id="add-prop">+ Add</button></div>
-      <form id="prop-form" hidden style="margin:10px 0">
-        <div class="field"><label for="p-addr">Address</label><input id="p-addr" required maxlength="300" placeholder="123 Main St, Modesto, CA"></div>
-        <div class="field"><label for="p-notes">Notes (optional)</label><input id="p-notes" maxlength="1000" placeholder="e.g. 3 bed / 2 bath, listing price, lot size"></div>
-        <div class="row"><button class="btn small" type="submit">Save property</button><button class="btn small ghost" type="button" id="p-cancel">Cancel</button></div>
-      </form>
-      ${c.properties.length ? c.properties.map((p) => `
-        <div class="prop" data-id="${p.id}">
-          <div class="spread">
-            <span class="addr">${esc(p.address)}</span>
-            <span class="row">
-              <a class="btn small ghost" href="${esc(mapsUrl(p.address))}" target="_blank" rel="noopener">Map</a>
-              <button class="btn small ghost" data-edit-prop="${p.id}">Edit</button>
-              ${isAdmin ? `<button class="btn small danger" data-del-prop="${p.id}">Remove</button>` : ''}
-            </span>
-          </div>
-          ${p.notes ? `<div class="muted small">${esc(p.notes)}</div>` : ''}
-        </div>`).join('') : '<p class="muted">No properties yet.</p>'}
-    </div>
-
-    <div class="card">
-      <div class="tabs" role="tablist">
-        <button class="tab" data-tab="comments" role="tab">Comments (${c.comments.length})</button>
-        <button class="tab" data-tab="history" role="tab">Full history</button>
-        <button class="tab" data-tab="files" role="tab">Files (${c.files.length})</button>
-      </div>
-
-      <section data-panel="comments">
-        <form id="comment-form">
-          <label for="comment">What happened? (call, meeting, showing, offer…)</label>
-          <textarea id="comment" maxlength="5000" required placeholder="e.g. Called buyer, interested in 2nd showing on Saturday. Budget firm at $450k."></textarea>
-          <div class="spread" style="margin-top:8px">
-            <span class="muted small">Saved with your name and the current date &amp; time.</span>
-            <button class="btn" type="submit">Save comment</button>
-          </div>
-        </form>
-        <ul class="timeline" style="margin-top:14px">
-          ${c.comments.length ? c.comments.map((m) => `
-            <li><span class="who">${esc(m.author || 'Former employee')}</span>
-              <span class="when"> · ${esc(fmtDate(m.created_at))}</span>
-              <div class="body">${esc(m.body)}</div></li>`).join('') : '<li class="sys muted">No comments yet.</li>'}
-        </ul>
-      </section>
-
-      <section data-panel="history">
-        <p class="muted small">Every comment and change, recorded automatically.</p>
-        <ul class="timeline">
-          ${history.map((h) => `
-            <li class="${h.kind === 'sys' ? 'sys' : ''}"><span class="who">${esc(h.who)}</span>
-              <span class="when"> · ${esc(fmtDate(h.t))}</span>
-              <div class="body ${h.kind === 'sys' ? 'muted small' : ''}">${esc(h.body)}</div></li>`).join('')}
-        </ul>
-      </section>
-
-      <section data-panel="files">
-        <form id="file-form" class="row" style="margin-bottom:10px">
-          <input type="file" id="file-input" multiple style="flex:1;min-width:200px">
-          <button class="btn" type="submit">Upload</button>
-        </form>
-        ${c.files.length ? c.files.map((f) => `
-          <div class="file">
-            <div><a href="/api/files/${f.id}?view=1" target="_blank" rel="noopener">${esc(f.original_name)}</a>
-              <div class="muted small">${esc(fmtSize(f.size))} · ${esc(f.uploaded_by || '—')} · ${esc(fmtDate(f.created_at))}</div></div>
-            <div class="row">
-              <a class="btn small ghost" href="/api/files/${f.id}">Download</a>
-              ${isAdmin ? `<button class="btn small danger" data-del-file="${f.id}">Delete</button>` : ''}
-            </div>
-          </div>`).join('') : '<p class="muted">No files yet.</p>'}
-      </section>
-    </div>
+    ${renderLog(c, { propTags: true, placeholder: 'e.g. Called buyer, interested in 2nd showing on Saturday. Budget firm at $450k.' })}
 
     ${isAdmin ? `<div style="text-align:center;margin:24px 0"><button class="btn danger small" id="del-client">Delete this ${esc(typeLabel[c.type].toLowerCase())} permanently</button></div>` : ''}
   `;
 
-  // tabs
-  const showTab = (t) => {
-    clientTab = t;
-    $$('.tab').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
-    $$('[data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== t; });
-  };
-  $$('.tab').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
-  showTab(clientTab);
+  bindLog(`/api/clients/${id}`, () => viewClient(id));
 
-  // comments
-  $('#comment-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const btn = $('button[type=submit]', e.target); btn.disabled = true;
-    try {
-      await api('POST', `/api/clients/${id}/comments`, { body: $('#comment').value });
-      toast('Comment saved');
-      clientTab = 'comments';
-      viewClient(id);
-    } catch (err) { toast(err.message, true); btn.disabled = false; }
+  const filter = $('#prop-filter');
+  if (filter) filter.addEventListener('input', () => {
+    const q = filter.value.trim().toLowerCase();
+    $$('#prop-list li[data-addr]').forEach((li) => { li.hidden = q && !li.dataset.addr.includes(q); });
   });
 
-  // properties
   const pf = $('#prop-form');
-  let editingProp = null;
-  $('#add-prop').addEventListener('click', () => {
-    editingProp = null; pf.hidden = false; $('#p-addr').value = ''; $('#p-notes').value = ''; $('#p-addr').focus();
-  });
+  $('#add-prop').addEventListener('click', () => { pf.hidden = false; $('#p-addr').value = ''; $('#p-notes').value = ''; $('#p-addr').focus(); });
   $('#p-cancel').addEventListener('click', () => { pf.hidden = true; });
-  $$('[data-edit-prop]').forEach((b) => b.addEventListener('click', () => {
-    const p = c.properties.find((x) => x.id === Number(b.dataset.editProp));
-    editingProp = p.id; pf.hidden = false; $('#p-addr').value = p.address; $('#p-notes').value = p.notes || '';
-    pf.scrollIntoView({ behavior: 'smooth', block: 'center' }); $('#p-addr').focus();
-  }));
   pf.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const body = { address: $('#p-addr').value, notes: $('#p-notes').value };
     try {
-      if (editingProp) await api('PATCH', `/api/properties/${editingProp}`, body);
-      else await api('POST', `/api/clients/${id}/properties`, body);
-      toast('Property saved'); viewClient(id);
+      await api('POST', `/api/clients/${id}/properties`, { address: $('#p-addr').value, notes: $('#p-notes').value });
+      toast('Property added'); viewClient(id);
     } catch (err) { toast(err.message, true); }
   });
-  $$('[data-del-prop]').forEach((b) => b.addEventListener('click', async () => {
-    if (!confirm('Remove this property?')) return;
-    try { await api('DELETE', `/api/properties/${b.dataset.delProp}`); toast('Removed'); viewClient(id); }
-    catch (err) { toast(err.message, true); }
-  }));
-
-  // files
-  $('#file-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const files = $('#file-input').files;
-    if (!files.length) return toast('Choose a file first', true);
-    const fd = new FormData();
-    for (const f of files) fd.append('files', f);
-    const btn = $('button', e.target); btn.disabled = true; btn.textContent = 'Uploading…';
-    try { await api('POST', `/api/clients/${id}/files`, fd); toast('Uploaded'); clientTab = 'files'; viewClient(id); }
-    catch (err) { toast(err.message, true); btn.disabled = false; btn.textContent = 'Upload'; }
-  });
-  $$('[data-del-file]').forEach((b) => b.addEventListener('click', async () => {
-    if (!confirm('Delete this file permanently?')) return;
-    try { await api('DELETE', `/api/files/${b.dataset.delFile}`); toast('Deleted'); viewClient(id); }
-    catch (err) { toast(err.message, true); }
-  }));
 
   const del = $('#del-client');
   if (del) del.addEventListener('click', async () => {
     if (prompt(`Type DELETE to permanently remove ${c.name}, with all comments, properties and files.`) !== 'DELETE') return;
     try { await api('DELETE', `/api/clients/${id}`); toast('Deleted'); go('#/'); }
+    catch (err) { toast(err.message, true); }
+  });
+}
+
+// ---------- property page ----------
+let lastPropId = null;
+async function viewProperty(id) {
+  setNav('search');
+  if (lastPropId !== id) { activeTab = 'comments'; lastPropId = id; }
+  const p = await api('GET', `/api/properties/${id}`);
+  const isAdmin = me.role === 'admin';
+
+  $app.innerHTML = `
+    <a href="#/client/${p.client_id}" class="back">← ${esc(p.client_name)}</a>
+    <div class="card client-head" style="margin-top:8px">
+      <p class="kicker">Property / site</p>
+      <h1 class="prop-title">${esc(p.address)}</h1>
+      <p class="owner">
+        ${badge(p.client_type)}
+        <a href="#/client/${p.client_id}">${esc(p.client_name)}</a>
+      </p>
+      <div class="quick">
+        <a class="btn small" href="${esc(mapsUrl(p.address))}" target="_blank" rel="noopener">Map</a>
+        ${p.client_phone ? `<a class="btn small ghost" href="${esc(telUrl(p.client_phone))}">Call</a>` : '<span></span>'}
+        <button class="btn small ghost" id="edit-prop">Edit</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Details</h2>
+      <form id="prop-form" hidden style="margin:12px 0">
+        <div class="field"><label for="p-addr">Address</label><input id="p-addr" required maxlength="300" value="${esc(p.address)}"></div>
+        <div class="field"><label for="p-notes">Notes</label><textarea id="p-notes" maxlength="1000">${esc(p.notes)}</textarea></div>
+        <div class="row"><button class="btn small" type="submit">Save</button><button class="btn small ghost" type="button" id="p-cancel">Cancel</button></div>
+      </form>
+      <ul class="contact-list" id="prop-details">
+        <li><span class="k">Notes</span><span class="v" style="white-space:pre-wrap">${esc(p.notes) || '<span class="muted">—</span>'}</span></li>
+        <li><span class="k">Owner / client</span><span class="v"><a href="#/client/${p.client_id}">${esc(p.client_name)}</a> (${esc(typeLabel[p.client_type])})</span></li>
+        <li><span class="k">Added</span><span class="v">${esc(fmtDate(p.created_at))} by ${esc(p.created_by_name || '—')}</span></li>
+      </ul>
+    </div>
+
+    ${renderLog(p, { propTags: false, placeholder: 'e.g. Showed this property to the Gills. They liked the backyard, asked about HOA fees.' })}
+
+    ${isAdmin ? '<div style="text-align:center;margin:24px 0"><button class="btn danger small" id="del-prop">Remove this property</button></div>' : ''}
+  `;
+
+  bindLog(`/api/properties/${id}`, () => viewProperty(id));
+
+  const pf = $('#prop-form');
+  $('#edit-prop').addEventListener('click', () => { pf.hidden = false; $('#prop-details').hidden = true; $('#p-addr').focus(); });
+  $('#p-cancel').addEventListener('click', () => { pf.hidden = true; $('#prop-details').hidden = false; });
+  pf.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await api('PATCH', `/api/properties/${id}`, { address: $('#p-addr').value, notes: $('#p-notes').value });
+      toast('Saved'); viewProperty(id);
+    } catch (err) { toast(err.message, true); }
+  });
+
+  const del = $('#del-prop');
+  if (del) del.addEventListener('click', async () => {
+    if (!confirm(`Remove ${p.address}? Its comments and files stay on ${p.client_name}'s profile.`)) return;
+    try { await api('DELETE', `/api/properties/${id}`); toast('Removed'); go(`#/client/${p.client_id}`); }
     catch (err) { toast(err.message, true); }
   });
 }
@@ -454,7 +522,7 @@ async function viewClientForm(id) {
         const r = await api('POST', '/api/clients', body);
         const first = $('#f-first').value.trim();
         if (first) await api('POST', `/api/clients/${r.id}/comments`, { body: first });
-        toast('Saved'); clientTab = 'comments'; go(`#/client/${r.id}`);
+        toast('Saved'); go(`#/client/${r.id}`);
       }
     } catch (err) { $('#form-err').textContent = err.message; btn.disabled = false; }
   });

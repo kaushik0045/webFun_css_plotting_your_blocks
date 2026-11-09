@@ -234,3 +234,33 @@ dialog {
 dialog::backdrop { background: rgba(0, 0, 0, .7); }
 .install-tip p { font-size: .9rem; }
 .install-tip b { color: #fff; }
+
+/* ---------- property list on a profile ---------- */
+h2 .count {
+  display: inline-block; min-width: 24px; padding: 3px 7px; margin-left: 6px; text-align: center;
+  background: var(--red); color: #fff; font-size: .72rem; vertical-align: middle;
+}
+.prop-list { list-style: none; margin: 12px 0 0; padding: 0; }
+.prop-link {
+  position: relative; display: flex; flex-direction: column; gap: 2px;
+  padding: 14px 40px 14px 14px; margin-bottom: 8px; text-decoration: none; color: inherit;
+  background: var(--ink-2); border: 1px solid var(--line); border-left: 3px solid var(--red);
+  transition: background .2s, border-color .2s;
+}
+.prop-link:hover { background: #24242a; border-color: var(--line-2); border-left-color: var(--red); }
+.prop-link::after {
+  content: "›"; position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+  font: 400 1.8rem/1 var(--head); color: var(--red);
+}
+.prop-link .addr { font-weight: 600; color: #fff; }
+.prop-link .notes { color: #c9c9cf; }
+
+/* ---------- property page ---------- */
+.prop-title { font-size: 1.35rem; text-transform: none; letter-spacing: 0; }
+.owner { margin: 4px 0 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.owner a { font-weight: 600; }
+.prop-tag {
+  display: inline-block; margin-left: 4px; padding: 2px 7px; font-size: .74rem; text-decoration: none;
+  color: #fff; border: 1px solid var(--red); background: rgba(225, 6, 0, .12);
+}
+.prop-tag::before { content: "⌂ "; color: var(--red); }

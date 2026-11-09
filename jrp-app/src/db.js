@@ -89,9 +89,20 @@ CREATE INDEX IF NOT EXISTS idx_files_client   ON files(client_id);
 CREATE INDEX IF NOT EXISTS idx_activity_client ON activity(client_id, created_at);
 `);
 
-function logActivity(clientId, userId, action, detail) {
-  db.prepare('INSERT INTO activity (client_id, user_id, action, detail) VALUES (?,?,?,?)')
-    .run(clientId, userId, action, detail || null);
+// Upgrades for databases created by older versions: comments, files and history
+// can now belong to one specific property as well as to the client.
+function addColumn(table, col, def) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+}
+for (const t of ['comments', 'files', 'activity']) {
+  addColumn(t, 'property_id', 'INTEGER REFERENCES properties(id) ON DELETE SET NULL');
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_${t}_property ON ${t}(property_id)`);
+}
+
+function logActivity(clientId, userId, action, detail, propertyId = null) {
+  db.prepare('INSERT INTO activity (client_id, user_id, action, detail, property_id) VALUES (?,?,?,?,?)')
+    .run(clientId, userId, action, detail || null, propertyId);
 }
 
 module.exports = { db, DATA_DIR, UPLOAD_DIR, logActivity };
