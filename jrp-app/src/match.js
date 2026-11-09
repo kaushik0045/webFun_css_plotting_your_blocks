@@ -38,6 +38,10 @@ function cleanDetails(questions, input, existing = {}) {
     }
     if (val === null) delete out[q.key]; else out[q.key] = val;
   }
+  // Drop follow-up answers whose condition is no longer true (e.g. rental amount when rental income is "No").
+  for (const q of questions) {
+    if (q.showIf && out[q.showIf.key] !== q.showIf.equals) delete out[q.key];
+  }
   return out;
 }
 
@@ -95,11 +99,11 @@ function scoreRule(rule, listing, buyer) {
   if (rule.kind === 'place') {
     const wanted = placesOf(b);
     if (!wanted.length) return { ...base, status: 'any', score: null, text: 'Buyer is open to any location.' };
-    const where = `${s || ''} ${listing.address || ''}`.toLowerCase();
+    const where = `${rule.seller === 'address' ? '' : s || ''} ${listing.address || ''}`.toLowerCase();
     const hit = wanted.find((w) => where.includes(w));
     return hit
       ? { ...base, status: 'match', score: 100, text: `In ${b.split(/[,;/]+/).map((x) => x.trim()).find((x) => x.toLowerCase() === hit)}, one of the buyer's preferred areas.` }
-      : { ...base, status: 'miss', score: 0, text: `Buyer prefers ${b}; this property is in ${s || listing.address}.` };
+      : { ...base, status: 'miss', score: 0, text: `Buyer prefers ${b}; this property is at ${listing.address}.` };
   }
 
   if (rule.kind === 'atLeast') {

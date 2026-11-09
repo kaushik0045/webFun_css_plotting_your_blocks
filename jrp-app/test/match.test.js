@@ -190,3 +190,17 @@ test('API: a buyer & seller is never matched with their own property', async () 
   const d = (await call('GET', `/api/clients/${id}/matches`)).data;
   assert.ok(!d.matches.some((m) => m.listing.client_id === id));
 });
+
+test("JRP seller questions: follow-up 'how much' only kept when rental income is Yes", () => {
+  const no = cleanDetails(SELLER_QUESTIONS, { rental_income: 'no', rental_income_amount: '5000' });
+  assert.deepEqual(no, { rental_income: 'no' });
+  const yes = cleanDetails(SELLER_QUESTIONS, { rental_income: 'yes', rental_income_amount: '$5,000' });
+  assert.equal(yes.rental_income_amount, 5000);
+  const lic = cleanDetails(SELLER_QUESTIONS, { abc_license: 'Applied for', cigarette_license: 'Maybe', brand: 'Chevron', gas_volume: '85,000' });
+  assert.deepEqual(lic, { abc_license: 'Applied for', brand: 'Chevron', gas_volume: 85000 });
+  for (const key of ['asking_price', 'brand', 'gas_volume', 'gas_margin', 'cstore_sales', 'fuel_contract', 'mpds', 'size_sqft', 'lot_acres',
+    'tank_size', 'double_walled', 'rental_income', 'rental_income_amount', 'gross_profit', 'nearest_freeway', 'abc_license',
+    'cigarette_license', 'ebt', 'lottery', 'building_rent', 'hours', 'additional_info']) {
+    assert.ok(SELLER_QUESTIONS.some((q) => q.key === key), `missing seller question ${key}`);
+  }
+});

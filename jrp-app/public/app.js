@@ -342,9 +342,10 @@ function fmtAnswer(q, v) {
 
 // Read-only list of answers.
 function answersHtml(list, values, emptyMsg) {
-  const answered = list.filter((q) => !isEmpty(values[q.key]));
+  const asked = list.filter((q) => !q.showIf || values[q.showIf.key] === q.showIf.equals);
+  const answered = asked.filter((q) => !isEmpty(values[q.key]));
   if (!answered.length) return `<p class="muted">${esc(emptyMsg)}</p>`;
-  const missing = list.length - answered.length;
+  const missing = asked.length - answered.length;
   return `<ul class="contact-list">${answered.map((q) => `
       <li><span class="k">${esc(q.label)}</span><span class="v" style="white-space:pre-wrap">${esc(fmtAnswer(q, values[q.key]))}</span></li>`).join('')}
     </ul>${missing ? `<p class="muted small" style="margin:8px 0 0">${missing} question${missing === 1 ? '' : 's'} not answered yet.</p>` : ''}`;
@@ -372,7 +373,10 @@ function questionFields(list, values, prefix) {
     } else {
       input = `<input id="${id}" maxlength="200" value="${esc(v)}">`;
     }
-    return `<div class="field">${q.type === 'multiselect' ? `<span class="label">${esc(q.label)}</span>` : `<label for="${id}">${esc(q.label)}</label>`}${input}${help}</div>`;
+    const cond = q.showIf
+      ? ` data-showif="${prefix}-${esc(q.showIf.key)}" data-equals="${esc(q.showIf.equals)}" ${values[q.showIf.key] === q.showIf.equals ? '' : 'hidden'}`
+      : '';
+    return `<div class="field"${cond}>${q.type === 'multiselect' ? `<span class="label">${esc(q.label)}</span>` : `<label for="${id}">${esc(q.label)}</label>`}${input}${help}</div>`;
   }).join('');
 }
 
@@ -468,6 +472,12 @@ function bindMatchesCard(list, mode) {
   const b = $('#show-all-matches');
   if (b) b.addEventListener('click', () => { $('#matches-card .match-list').innerHTML = list.map((m) => matchItem(m, mode)).join(''); b.remove(); });
 }
+
+// Show or hide follow-up questions (e.g. "If yes, how much?") as answers change.
+document.addEventListener('change', (e) => {
+  if (!e.target.id) return;
+  $$(`[data-showif="${CSS.escape(e.target.id)}"]`).forEach((f) => { f.hidden = e.target.value !== f.dataset.equals; });
+});
 
 // One click handler for every "See why" button on any screen.
 document.addEventListener('click', (e) => {
