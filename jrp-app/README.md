@@ -53,7 +53,7 @@ jrp-app/
 
 ## Part 2: Run it on your own computer
 
-1. Install **Node.js 20 or newer** from https://nodejs.org (choose "LTS").
+1. Install **Node.js 22.13 or newer** from https://nodejs.org (the LTS version is fine).
 2. Open a terminal in this `jrp-app` folder and install the packages:
    ```bash
    npm install
@@ -118,7 +118,7 @@ It opens full-screen with the JRP icon. The same instructions are inside the app
 
 ## Part 5: Keeping data safe
 
-- **Backups:** in Render, open the service → **Disks** → snapshots are taken daily and you can restore one. For an extra copy, download the database from the **Shell** tab with `node -e "require('better-sqlite3')('/var/data/jrp.db').backup('/var/data/backup.db')"`.
+- **Backups:** in Render, open the service → **Disks** → snapshots are taken daily and you can restore one. For an extra copy, run this in the **Shell** tab: `node -e "new (require('node:sqlite').DatabaseSync)('/var/data/jrp.db').exec(\"VACUUM INTO '/var/data/backup.db'\")"`.
 - **Someone leaves the company:** go to **Team** → **Manage** → Access: **Off**. They're logged out immediately and their comments stay in the history.
 - **Forgot admin password:** in Render's **Shell** tab run
   `npm run create-admin -- "Your Name" you@jrp.com "NewPassword123"`

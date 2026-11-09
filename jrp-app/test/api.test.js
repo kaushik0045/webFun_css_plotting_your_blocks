@@ -39,7 +39,7 @@ const anon = agent();
 const ids = {};
 
 before(async () => {
-  server = spawn(process.execPath, ['server.js'], {
+  server = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'server.js'], {
     cwd: ROOT,
     env: { ...process.env, PORT: String(PORT), DATA_DIR, ADMIN_EMAIL: 'boss@test.com', ADMIN_PASSWORD: 'BossPass123', ADMIN_NAME: 'Boss Admin', NODE_ENV: 'test' },
     stdio: ['ignore', 'pipe', 'pipe'],

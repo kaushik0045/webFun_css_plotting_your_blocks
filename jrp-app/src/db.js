@@ -2,15 +2,30 @@
 // DATA_DIR is where the database and uploaded files live (a persistent disk in production).
 const path = require('path');
 const fs = require('fs');
-const Database = require('better-sqlite3');
+// Node's built-in SQLite: nothing to compile, works on any computer with Node.js 22.13 or newer.
+const { DatabaseSync } = require('node:sqlite');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-const db = new Database(path.join(DATA_DIR, 'jrp.db'));
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+const db = new DatabaseSync(path.join(DATA_DIR, 'jrp.db'));
+db.exec('PRAGMA journal_mode = WAL');
+db.exec('PRAGMA foreign_keys = ON');
+db.exec('PRAGMA busy_timeout = 5000');
+
+// Runs several changes as one unit: either all of them are saved, or none.
+db.transaction = (fn) => (...args) => {
+  db.exec('BEGIN');
+  try {
+    const result = fn(...args);
+    db.exec('COMMIT');
+    return result;
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+};
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (

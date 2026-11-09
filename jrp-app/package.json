@@ -4,16 +4,15 @@
   "description": "JRP employee app: buyers, sellers, properties, comments and history",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
-    "create-admin": "node scripts/create-admin.js",
-    "demo-data": "node scripts/seed-demo.js",
-    "test": "node --test test/*.test.js"
+    "start": "node --disable-warning=ExperimentalWarning server.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch server.js",
+    "create-admin": "node --disable-warning=ExperimentalWarning scripts/create-admin.js",
+    "demo-data": "node --disable-warning=ExperimentalWarning scripts/seed-demo.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js"
   },
   "license": "UNLICENSED",
   "dependencies": {
     "bcryptjs": "^3.0.3",
-    "better-sqlite3": "^13.0.3",
     "express": "^5.3.0",
     "express-session": "^1.19.0",
     "helmet": "^8.3.0",
@@ -21,6 +20,6 @@
   },
   "private": true,
   "engines": {
-    "node": "22.x || 24.x"
+    "node": ">=22.13"
   }
 }
