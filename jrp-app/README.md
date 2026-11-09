@@ -68,6 +68,11 @@ jrp-app/
    ```
 5. Open **http://localhost:3000** and log in.
 
+To check that everything works, run the automated tests (about 5 seconds, uses its own throwaway database):
+   ```bash
+   npm test
+   ```
+
 `npm run dev` restarts the server automatically when you edit `server.js`. For changes to `public/` files, just refresh the browser.
 
 To test on your phone while it's on the same Wi-Fi, open `http://YOUR-COMPUTER-IP:3000`.

@@ -223,7 +223,7 @@ input[type=file] { background: var(--ink-2); color: var(--text); border: 1px das
   position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom)); transform: translateX(-50%);
   background: #fff; color: var(--dark-text); padding: 13px 20px; z-index: 50; border-left: 4px solid var(--red);
   font: 600 .78rem/1.3 var(--head); letter-spacing: .1em; text-transform: uppercase;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, .5); max-width: 90vw;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .5); max-width: 90vw; pointer-events: none;
 }
 .toast.err { background: var(--red); color: #fff; border-left-color: #fff; }
 

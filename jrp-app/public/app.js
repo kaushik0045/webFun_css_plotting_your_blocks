@@ -81,17 +81,18 @@ async function route() {
   const parts = hash.slice(2).split('/');
   window.scrollTo(0, 0);
   try {
-    if (parts[0] === 'login') return viewLogin();
-    if (parts[0] === '' ) return viewSearch();
-    if (parts[0] === 'new') return viewClientForm(null);
-    if (parts[0] === 'client' && parts[1] && parts[2] === 'edit') return viewClientForm(Number(parts[1]));
-    if (parts[0] === 'client' && parts[1]) return viewClient(Number(parts[1]));
-    if (parts[0] === 'property' && parts[1]) return viewProperty(Number(parts[1]));
-    if (parts[0] === 'admin') return viewAdmin();
-    if (parts[0] === 'account') return viewAccount();
+    if (parts[0] === 'login') return await viewLogin();
+    if (parts[0] === '' ) return await viewSearch();
+    if (parts[0] === 'new') return await viewClientForm(null);
+    if (parts[0] === 'client' && parts[1] && parts[2] === 'edit') return await viewClientForm(Number(parts[1]));
+    if (parts[0] === 'client' && parts[1]) return await viewClient(Number(parts[1]));
+    if (parts[0] === 'property' && parts[1]) return await viewProperty(Number(parts[1]));
+    if (parts[0] === 'admin') return await viewAdmin();
+    if (parts[0] === 'account') return await viewAccount();
     $app.innerHTML = '<div class="empty">Page not found. <a href="#/">Go to search</a></div>';
   } catch (e) {
-    $app.innerHTML = `<div class="card"><p class="error">${esc(e.message)}</p><a href="#/">Back to search</a></div>`;
+    setNav('search');
+    $app.innerHTML = `<div class="card"><p class="error">${esc(e.message)}</p><a class="back" href="#/">← Back to search</a></div>`;
   }
 }
 window.addEventListener('hashchange', route);
