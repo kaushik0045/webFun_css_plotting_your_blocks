@@ -344,3 +344,59 @@ test('a seller created with listing answers is saved and matched straight away',
   assert.equal(d.listing_status, 'For sale');
   assert.equal(c.properties[0].for_sale, true);
 });
+
+test('reminders: set, list, calendar file, secret link, done', async () => {
+  const a = admin;
+  const id = (await a('POST', '/api/clients', { type: 'buyer', name: 'Reminder Person', phone: '209-555-0000' })).data.id;
+  const when = new Date(Date.now() + 2 * 24 * 3600e3);
+  when.setUTCHours(17, 30, 0, 0);
+  const bad = await a('POST', `/api/clients/${id}/reminders`, { due_at: 'not a date' });
+  assert.equal(bad.status, 400);
+  const tooOld = await a('POST', `/api/clients/${id}/reminders`, { due_at: '2001-01-01T10:00:00Z' });
+  assert.equal(tooOld.status, 400);
+  const r = await a('POST', `/api/clients/${id}/reminders`, { due_at: when.toISOString(), note: 'Ask about lender; budget, timing' });
+  assert.equal(r.status, 200);
+  assert.ok(r.data.cal_key && r.data.cal_key.length >= 20);
+
+  const mine = (await a('GET', '/api/reminders')).data;
+  assert.ok(mine.some((x) => x.id === r.data.id && x.client_name === 'Reminder Person'));
+  const prof = (await a('GET', `/api/clients/${id}`)).data;
+  assert.equal(prof.reminders.length, 1);
+  assert.ok(prof.activity.some((x) => x.action === 'reminder_set'));
+
+  // calendar file with login
+  const ics = await a('GET', `/api/reminders/${r.data.id}/calendar.ics`, undefined, { raw: true });
+  assert.equal(ics.status, 200);
+  assert.match(ics.headers.get('content-type'), /text\/calendar/);
+  const body = await ics.text();
+  assert.match(body, /BEGIN:VCALENDAR/);
+  assert.match(body, /SUMMARY:Call Reminder Person/);
+  assert.match(body, new RegExp(`DTSTART:${when.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')}`));
+  assert.match(body, /TRIGGER:-PT15M/);
+  assert.match(body, /209-555-0000/);
+  const unfolded = body.replace(/\r\n /g, ''); // calendar apps join folded lines back together
+  assert.ok(unfolded.includes('lender\\; budget\\, timing'), 'commas and semicolons escaped');
+  assert.ok(body.split('\r\n').every((l) => l.length <= 75), 'calendar lines folded');
+
+  // secret link works without login; wrong key does not
+  const noLogin = await fetch(`${BASE}/api/reminders/${r.data.id}/calendar.ics?k=${encodeURIComponent(r.data.cal_key)}`);
+  assert.equal(noLogin.status, 200);
+  const wrong = await fetch(`${BASE}/api/reminders/${r.data.id}/calendar.ics?k=${'x'.repeat(r.data.cal_key.length)}`);
+  assert.equal(wrong.status, 401);
+  assert.equal((await fetch(`${BASE}/api/reminders/${r.data.id}/calendar.ics`)).status, 401);
+
+  // another employee cannot see or complete it
+  const other = agent();
+  await admin('POST', '/api/admin/users', { name: 'Other Agent', email: 'other@test.com', password: 'OtherPass1' });
+  await other('POST', '/api/login', { email: 'other@test.com', password: 'OtherPass1' });
+  assert.equal((await other('GET', `/api/reminders/${r.data.id}/calendar.ics`)).status, 403);
+  assert.equal((await other('PATCH', `/api/reminders/${r.data.id}`, { done: true })).status, 403);
+  assert.ok(!(await other('GET', '/api/reminders')).data.some((x) => x.id === r.data.id));
+  const otherView = (await other('GET', `/api/clients/${id}`)).data;
+  assert.equal(otherView.reminders[0].cal_key, null, "other agents don't get the secret key");
+
+  // done
+  assert.equal((await a('PATCH', `/api/reminders/${r.data.id}`, { done: true })).status, 200);
+  assert.ok(!(await a('GET', '/api/reminders')).data.some((x) => x.id === r.data.id));
+  assert.ok((await a('GET', `/api/clients/${id}`)).data.activity.some((x) => x.action === 'reminder_done'));
+});

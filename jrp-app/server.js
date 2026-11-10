@@ -282,6 +282,10 @@ app.get('/api/clients/:id', requireAuth, (req, res) => {
     }
   }
   Object.assign(client, timeline('client_id', id));
+  client.reminders = db.prepare(`SELECT r.id, r.due_at, r.note, r.user_id, u.name AS agent_name,
+      CASE WHEN r.user_id = ? THEN r.cal_key END AS cal_key
+    FROM reminders r JOIN users u ON u.id = r.user_id
+    WHERE r.client_id = ? AND r.done_at IS NULL ORDER BY r.due_at`).all(req.user.id, id);
   res.json(client);
 });
 
@@ -401,6 +405,91 @@ app.post('/api/properties/:id/comments', requireAuth, (req, res) => {
   const p = db.prepare('SELECT * FROM properties WHERE id = ?').get(Number(req.params.id));
   if (!p) return fail(res, 404, 'Property not found');
   addComment(req, res, p.client_id, p.id);
+});
+
+// ---------- reminders ("call this person on ...") ----------
+const reminderRow = (id) => db.prepare(`SELECT r.*, c.name AS client_name, c.phone AS client_phone, c.type AS client_type, u.name AS agent_name
+  FROM reminders r JOIN clients c ON c.id = r.client_id JOIN users u ON u.id = r.user_id WHERE r.id = ?`).get(Number(id));
+
+app.post('/api/clients/:id/reminders', requireAuth, (req, res) => {
+  const c = getClient(req.params.id);
+  if (!c) return fail(res, 404, 'Client not found');
+  const when = new Date(String(req.body.due_at || ''));
+  if (Number.isNaN(when.getTime())) return fail(res, 400, 'Pick a date and time for the reminder');
+  const yearMs = 366 * 24 * 3600e3;
+  if (when.getTime() < Date.now() - 24 * 3600e3 || when.getTime() > Date.now() + 2 * yearMs) return fail(res, 400, 'Pick a date between today and two years from now');
+  const due = when.toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const note = clean(req.body.note, 500);
+  const r = db.prepare('INSERT INTO reminders (client_id, user_id, due_at, note, cal_key) VALUES (?,?,?,?,?)')
+    .run(c.id, req.user.id, due, note || null, crypto.randomBytes(18).toString('base64url'));
+  logActivity(c.id, req.user.id, 'reminder_set', due);
+  const row = reminderRow(r.lastInsertRowid);
+  res.json({ id: row.id, due_at: row.due_at, note: row.note, client_id: row.client_id, cal_key: row.cal_key });
+});
+
+// My open reminders (overdue first), for the home screen.
+app.get('/api/reminders', requireAuth, (req, res) => {
+  res.json(db.prepare(`SELECT r.id, r.due_at, r.note, r.client_id, r.cal_key, c.name AS client_name, c.phone AS client_phone, c.type AS client_type
+    FROM reminders r JOIN clients c ON c.id = r.client_id
+    WHERE r.user_id = ? AND r.done_at IS NULL ORDER BY r.due_at LIMIT 100`).all(req.user.id));
+});
+
+app.patch('/api/reminders/:id', requireAuth, (req, res) => {
+  const r = reminderRow(req.params.id);
+  if (!r) return fail(res, 404, 'Reminder not found');
+  if (r.user_id !== req.user.id && req.user.role !== 'admin') return fail(res, 403, 'Only the agent who set this reminder can change it');
+  if (req.body.done) {
+    if (!r.done_at) {
+      db.prepare('UPDATE reminders SET done_at = ? WHERE id = ?').run(now(), r.id);
+      logActivity(r.client_id, req.user.id, 'reminder_done', r.due_at);
+    }
+  }
+  res.json({ ok: true });
+});
+
+// Calendar file (.ics). iPhone shows "Add to Calendar"; Android opens it in the calendar app.
+const icsText = (t) => String(t || '').replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/([,;])/g, '\\$1');
+const icsTime = (iso) => iso.replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+function icsFold(line) { // calendar lines must be at most 75 characters
+  const out = [];
+  while (line.length > 74) { out.push(line.slice(0, 74)); line = ' ' + line.slice(74); }
+  out.push(line);
+  return out.join('\r\n');
+}
+// Opened either with the agent's login, or with the reminder's own secret key (?k=...).
+app.get('/api/reminders/:id/calendar.ics', (req, res, next) => {
+  const r = reminderRow(req.params.id);
+  const k = typeof req.query.k === 'string' ? req.query.k : '';
+  if (r && r.cal_key && k && k.length === r.cal_key.length
+    && crypto.timingSafeEqual(Buffer.from(k), Buffer.from(r.cal_key))) { req.reminder = r; return next(); }
+  return requireAuth(req, res, () => {
+    if (!r) return fail(res, 404, 'Reminder not found');
+    if (r.user_id !== req.user.id && req.user.role !== 'admin') return fail(res, 403, 'Not your reminder');
+    req.reminder = r;
+    next();
+  });
+}, (req, res) => {
+  const r = req.reminder;
+  const start = new Date(r.due_at);
+  const end = new Date(start.getTime() + 15 * 60e3);
+  const link = `${req.protocol}://${req.get('host')}/#/client/${r.client_id}`;
+  const desc = [`Call ${r.client_name}${r.client_phone ? ` at ${r.client_phone}` : ''}.`, r.note || '', `Open in JRP Client Book: ${link}`].filter(Boolean).join('\n');
+  const lines = [
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//JRP//Client Book//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
+    'BEGIN:VEVENT',
+    `UID:jrp-reminder-${r.id}@jrp-client-book`,
+    `DTSTAMP:${icsTime(new Date().toISOString())}`,
+    `DTSTART:${icsTime(start.toISOString())}`,
+    `DTEND:${icsTime(end.toISOString())}`,
+    `SUMMARY:${icsText(`Call ${r.client_name}`)}`,
+    `DESCRIPTION:${icsText(desc)}`,
+    `URL:${link}`,
+    'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsText(`Call ${r.client_name}`)}`, 'TRIGGER:-PT15M', 'END:VALARM',
+    'END:VEVENT', 'END:VCALENDAR',
+  ].map(icsFold);
+  res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+  res.setHeader('Content-Disposition', `inline; filename="call-${String(r.client_name).replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.ics"`);
+  res.send(lines.join('\r\n') + '\r\n');
 });
 
 // ---------- questions & matching ----------

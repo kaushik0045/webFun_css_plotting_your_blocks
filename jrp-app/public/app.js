@@ -156,11 +156,17 @@ const searchState = { q: '', type: 'all', agent: '' };
 async function viewSearch() {
   const navAt = navToken;
   setNav('search');
-  const team = await agents();
+  const [team, myRem] = await Promise.all([agents(), api('GET', '/api/reminders')]);
   if (navAt !== navToken || !onPage('#/')) return;
   $app.innerHTML = `
     <p class="kicker">Client Book</p>
     <h1>Hi, ${esc(me.name.split(' ')[0])}</h1>
+    ${myRem.length ? `
+    <div class="card my-reminders">
+      <h2>My reminders <span class="count">${myRem.length}</span></h2>
+      <ul class="rem-list">${myRem.slice(0, 6).map((r) => reminderLine(r, { showClient: true })).join('')}</ul>
+      ${myRem.length > 6 ? `<p class="muted small">+ ${myRem.length - 6} more later</p>` : ''}
+    </div>` : ''}
     <div class="searchbar">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
       <input id="q" type="search" placeholder="Name, phone, email or address" autocomplete="off" value="${esc(searchState.q)}" aria-label="Search clients">
@@ -197,6 +203,7 @@ async function viewSearch() {
     runSearch();
   }));
   $('#agent-filter').addEventListener('change', (e) => { searchState.agent = e.target.value; runSearch(); });
+  bindReminderDone(() => viewSearch());
   runSearch();
 }
 
@@ -233,11 +240,111 @@ async function runSearch() {
     : `<li class="empty">No matches. <a href="#/new">Add a new buyer or seller</a></li>`;
 }
 
+// ---------- reminders: "call this person on ..." + phone calendar ----------
+let pendingReminder = null; // set right after a comment is saved, so the next screen asks "Set a reminder?"
+const pad2 = (n) => String(n).padStart(2, '0');
+function tomorrowAt10() {
+  const d = new Date(Date.now() + 24 * 3600e3);
+  return { date: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`, time: '10:00' };
+}
+function fmtWhen(iso) {
+  const d = new Date(iso);
+  const today = new Date(); const tmr = new Date(Date.now() + 24 * 3600e3);
+  const same = (a, b) => a.toDateString() === b.toDateString();
+  const t = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  if (same(d, today)) return `Today, ${t}`;
+  if (same(d, tmr)) return `Tomorrow, ${t}`;
+  return d.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+const gcalTime = (iso) => new Date(iso).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+function googleCalUrl(r, who) {
+  const end = new Date(new Date(r.due_at).getTime() + 15 * 60e3).toISOString();
+  const details = [`Call ${who.name}${who.phone ? ` at ${who.phone}` : ''}.`, r.note || '', `${location.origin}/#/client/${who.id}`].filter(Boolean).join('\n');
+  return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(`Call ${who.name}`)}&dates=${gcalTime(r.due_at)}/${gcalTime(end)}&details=${encodeURIComponent(details)}`;
+}
+
+// The box: asks "Set a reminder?" (or goes straight to the form), then offers "Add to my phone's calendar".
+function reminderBoxHtml(who, { ask = true, note = '' } = {}) {
+  const def = tomorrowAt10();
+  return `<div class="reminder-box" id="reminder-box">
+      <p class="rb-q">⏰ Set a reminder to call <b>${esc(who.name)}</b>?</p>
+      <div class="row" id="rb-ask" ${ask ? '' : 'hidden'}>
+        <button type="button" class="btn small" id="rb-yes">Yes, set reminder</button>
+        <button type="button" class="btn small ghost" id="rb-no">No thanks</button>
+      </div>
+      <form id="rb-form" ${ask ? 'hidden' : ''}>
+        <div class="grid2">
+          <div class="field"><label for="rb-date">Date</label><input type="date" id="rb-date" required value="${def.date}"></div>
+          <div class="field"><label for="rb-time">Time</label><input type="time" id="rb-time" required value="${def.time}"></div>
+        </div>
+        <div class="field"><label for="rb-note">Note (optional)</label><input id="rb-note" maxlength="500" value="${esc(note)}" placeholder="e.g. Ask if the lender approved"></div>
+        <div class="row"><button class="btn small" type="submit">Save reminder</button><button type="button" class="btn small ghost" id="rb-cancel">Cancel</button></div>
+        <p class="error" id="rb-err"></p>
+      </form>
+      <div id="rb-done" hidden></div>
+    </div>`;
+}
+function bindReminderBox(who, onSaved) {
+  const box = $('#reminder-box');
+  if (!box) return;
+  const close = () => box.remove();
+  const yes = $('#rb-yes', box);
+  if (yes) yes.addEventListener('click', () => { $('#rb-ask', box).hidden = true; $('#rb-form', box).hidden = false; $('#rb-date', box).focus(); });
+  const no = $('#rb-no', box);
+  if (no) no.addEventListener('click', close);
+  $('#rb-cancel', box).addEventListener('click', close);
+  $('#rb-form', box).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('button[type=submit]', e.target); btn.disabled = true;
+    const when = new Date(`${$('#rb-date', box).value}T${$('#rb-time', box).value}`);
+    if (Number.isNaN(when.getTime())) { $('#rb-err', box).textContent = 'Pick a date and time.'; btn.disabled = false; return; }
+    try {
+      const r = await api('POST', `/api/clients/${who.id}/reminders`, { due_at: when.toISOString(), note: $('#rb-note', box).value });
+      $('#rb-form', box).hidden = true;
+      $('.rb-q', box).innerHTML = `✅ Reminder saved: call <b>${esc(who.name)}</b> ${esc(fmtWhen(r.due_at))}.`;
+      const done = $('#rb-done', box);
+      done.innerHTML = `
+        <a class="btn block" id="rb-ics" href="/api/reminders/${r.id}/calendar.ics?k=${encodeURIComponent(r.cal_key || '')}">📅 Add to my phone's calendar</a>
+        <a class="btn ghost small block" id="rb-gcal" href="${esc(googleCalUrl(r, who))}" target="_blank" rel="noopener">Or add to Google Calendar</a>
+        <p class="help">iPhone: tap the button, then <b>Add</b>. Android: open the file with your Calendar app, or use Google Calendar.</p>
+        <button type="button" class="btn small ghost" id="rb-close">Close</button>`;
+      done.hidden = false;
+      $('#rb-close', box).addEventListener('click', () => { close(); if (onSaved) onSaved(); });
+    } catch (err) { $('#rb-err', box).textContent = err.message; btn.disabled = false; }
+  });
+}
+
+// One open reminder line (profile + home screen).
+function reminderLine(r, { showClient = false } = {}) {
+  const overdue = new Date(r.due_at).getTime() < Date.now();
+  const mine = r.user_id === undefined || r.user_id === me.id;
+  return `<li class="rem ${overdue ? 'overdue' : ''}" data-rem="${r.id}">
+      <div class="rem-main">
+        <span class="rem-when">${overdue ? 'Overdue · ' : ''}${esc(fmtWhen(r.due_at))}</span>
+        ${showClient ? `<a class="rem-who" href="#/client/${r.client_id}">Call ${esc(r.client_name)}</a>` : `<span class="rem-who">${esc(r.agent_name || '')}</span>`}
+        ${r.note ? `<span class="rem-note">${esc(r.note)}</span>` : ''}
+      </div>
+      <div class="rem-actions">
+        ${showClient && r.client_phone ? `<a class="btn small" href="${esc(telUrl(r.client_phone))}">Call</a>` : ''}
+        ${mine ? `<a class="btn small ghost" href="/api/reminders/${r.id}/calendar.ics?k=${encodeURIComponent(r.cal_key || '')}" title="Add to calendar">📅</a>` : ''}
+        ${mine || me.role === 'admin' ? `<button type="button" class="btn small ghost" data-rem-done="${r.id}">Done</button>` : ''}
+      </div>
+    </li>`;
+}
+function bindReminderDone(reload) {
+  $$('[data-rem-done]').forEach((b) => b.addEventListener('click', async () => {
+    b.disabled = true;
+    try { await api('PATCH', `/api/reminders/${b.dataset.remDone}`, { done: true }); toast('Reminder done'); reload(); }
+    catch (err) { toast(err.message, true); b.disabled = false; }
+  }));
+}
+
 // ---------- shared: comments / history / files block ----------
 // Used on both the person's profile (everything) and a property page (just that property).
 let activeTab = 'comments';
 
-function renderLog(d, { propTags, placeholder }) {
+function renderLog(d, { propTags, placeholder, who }) {
+  const askReminder = who && pendingReminder && pendingReminder.clientId === who.id;
   const isAdmin = me.role === 'admin';
   const tag = (x) => (propTags && x.property_id
     ? `<a class="prop-tag" href="#/property/${x.property_id}">${esc(x.property_address || 'Property')}</a>` : '');
@@ -255,6 +362,7 @@ function renderLog(d, { propTags, placeholder }) {
       </div>
 
       <section data-panel="comments">
+        ${askReminder ? reminderBoxHtml(who, { note: pendingReminder.note }) : ''}
         <form id="comment-form">
           <label for="comment">What happened? (call, meeting, showing, offer…)</label>
           <textarea id="comment" maxlength="5000" required placeholder="${esc(placeholder)}"></textarea>
@@ -299,7 +407,11 @@ function renderLog(d, { propTags, placeholder }) {
     </div>`;
 }
 
-function bindLog(baseUrl, reload) {
+function bindLog(baseUrl, reload, who) {
+  if (who && pendingReminder && pendingReminder.clientId === who.id) {
+    pendingReminder = null;
+    bindReminderBox(who, reload);
+  }
   const showTab = (t) => {
     activeTab = t;
     $$('.tab').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
@@ -312,7 +424,9 @@ function bindLog(baseUrl, reload) {
     e.preventDefault();
     const btn = $('button[type=submit]', e.target); btn.disabled = true;
     try {
-      await api('POST', `${baseUrl}/comments`, { body: $('#comment').value });
+      const text = $('#comment').value.trim();
+      await api('POST', `${baseUrl}/comments`, { body: text });
+      if (who) pendingReminder = { clientId: who.id, note: text.length > 80 ? `${text.slice(0, 77)}…` : text };
       toast('Comment saved'); activeTab = 'comments'; reload();
     } catch (err) { toast(err.message, true); btn.disabled = false; }
   });
@@ -549,6 +663,7 @@ async function viewClient(id) {
   const isAdmin = me.role === 'admin';
   const many = c.properties.length > 4;
   const isBuyer = c.type === 'buyer' || c.type === 'both';
+  const who = { id: c.id, name: c.name, phone: c.phone };
   const isSeller = c.type === 'seller' || c.type === 'both';
   const propInfo = (p) => {
     const d = p.details || {};
@@ -588,6 +703,9 @@ async function viewClient(id) {
         ${c.phone ? `<a class="btn small ghost" href="sms:${esc(c.phone.replace(/[^\d+]/g, ''))}">Text</a>` : '<span></span>'}
         ${c.email ? `<a class="btn small ghost" href="mailto:${esc(c.email)}">Email</a>` : '<span></span>'}
       </div>
+      ${c.reminders.length ? `<ul class="rem-list">${c.reminders.map((r) => reminderLine(r)).join('')}</ul>` : ''}
+      <button type="button" class="btn small ghost block rem-add" id="add-reminder">⏰ Set a reminder to call</button>
+      <div id="rem-slot"></div>
     </div>
 
     ${c.type === 'buyer' && c.details.exchange_1031 === 'yes' && !dismissed1031(c.id) ? `
@@ -647,12 +765,20 @@ async function viewClient(id) {
       </ul>
     </div>
 
-    ${renderLog(c, { propTags: true, placeholder: 'e.g. Called buyer, interested in 2nd showing on Saturday. Budget firm at $450k.' })}
+    ${renderLog(c, { propTags: true, placeholder: 'e.g. Called buyer, interested in 2nd showing on Saturday. Budget firm at $450k.', who })}
 
     ${isAdmin ? `<div style="text-align:center;margin:24px 0"><button class="btn danger small" id="del-client">Delete this ${esc(typeLabel[c.type].toLowerCase())} permanently</button></div>` : ''}
   `;
 
-  bindLog(`/api/clients/${id}`, () => viewClient(id));
+  bindLog(`/api/clients/${id}`, () => viewClient(id), who);
+  bindReminderDone(() => viewClient(id));
+  $('#add-reminder').addEventListener('click', () => {
+    const slot = $('#rem-slot');
+    if ($('#reminder-box')) return;
+    slot.innerHTML = reminderBoxHtml(who, { ask: false });
+    bindReminderBox(who, () => viewClient(id));
+    $('#rb-date').focus();
+  });
   const mb = $('#make-both');
   if (mb) {
     mb.addEventListener('click', async () => {
@@ -760,12 +886,12 @@ async function viewProperty(id, startEditing = false) {
       ? matchesCard('Matching buyers', mres.matches, 'buyer', 'No buyers yet.')
       : `<div class="card"><h2>Matching buyers</h2><p class="muted">This property is marked "${esc(p.details.listing_status || 'Not for sale')}", so it is not matched with buyers. Set the listing status to "For sale" to see matches.</p></div>`) : ''}
 
-    ${renderLog(p, { propTags: false, placeholder: 'e.g. Showed this property to the Gills. They liked the backyard, asked about HOA fees.' })}
+    ${renderLog(p, { propTags: false, placeholder: 'e.g. Showed this property to the Gills. They liked the backyard, asked about HOA fees.', who: { id: p.client_id, name: p.client_name, phone: p.client_phone } })}
 
     ${isAdmin ? '<div style="text-align:center;margin:24px 0"><button class="btn danger small" id="del-prop">Remove this property</button></div>' : ''}
   `;
 
-  bindLog(`/api/properties/${id}`, () => viewProperty(id));
+  bindLog(`/api/properties/${id}`, () => viewProperty(id), { id: p.client_id, name: p.client_name, phone: p.client_phone });
   if (sellerSide && mres.for_sale) bindMatchesCard(mres.matches, 'buyer');
 
   const pf = $('#prop-form');
@@ -802,6 +928,8 @@ function activityText(a) {
     property_removed: `Removed property: ${a.detail}`,
     file_uploaded: `Uploaded file: ${a.detail}`,
     file_removed: `Deleted file: ${a.detail}`,
+    reminder_set: `Set a reminder to call: ${a.detail ? fmtWhen(a.detail) : ''}`,
+    reminder_done: `Completed the call reminder (was due ${a.detail ? fmtWhen(a.detail) : ''})`,
   };
   return map[a.action] || `${a.action}${a.detail ? ': ' + a.detail : ''}`;
 }

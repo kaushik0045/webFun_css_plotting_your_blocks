@@ -91,6 +91,19 @@ CREATE TABLE IF NOT EXISTS activity (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
 
+-- "Call this person on <date>" reminders. Each belongs to one agent.
+CREATE TABLE IF NOT EXISTS reminders (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id  INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  due_at     TEXT NOT NULL,
+  note       TEXT,
+  done_at    TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id, done_at, due_at);
+CREATE INDEX IF NOT EXISTS idx_reminders_client ON reminders(client_id);
+
 CREATE TABLE IF NOT EXISTS sessions (
   sid     TEXT PRIMARY KEY,
   data    TEXT NOT NULL,
@@ -117,6 +130,8 @@ for (const t of ['comments', 'files', 'activity']) {
 // Answers to the buyer / seller questions (see src/questions.js), stored as JSON.
 addColumn('clients', 'details', "TEXT NOT NULL DEFAULT '{}'");
 addColumn('properties', 'details', "TEXT NOT NULL DEFAULT '{}'");
+// Secret per-reminder key, so the calendar file opens even where the login cookie isn't shared (iPhone home-screen apps).
+addColumn('reminders', 'cal_key', 'TEXT');
 
 function logActivity(clientId, userId, action, detail, propertyId = null) {
   db.prepare('INSERT INTO activity (client_id, user_id, action, detail, property_id) VALUES (?,?,?,?,?)')
