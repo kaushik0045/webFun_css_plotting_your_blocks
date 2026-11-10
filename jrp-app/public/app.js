@@ -80,10 +80,81 @@ async function refreshUnread() {
     unreadInfo = await api('GET', '/api/chat/unread');
     const b = document.getElementById('chat-badge');
     if (b) { b.hidden = !unreadInfo.total; b.textContent = unreadInfo.total > 99 ? '99+' : String(unreadInfo.total); }
+    document.title = unreadInfo.total ? `(${unreadInfo.total}) JRP Client Book` : 'JRP Client Book';
+    maybePopup(unreadInfo);
   } catch { /* offline or logged out */ }
 }
-setInterval(refreshUnread, 15000);
+setInterval(refreshUnread, 5000);
 document.addEventListener('visibilitychange', refreshUnread);
+
+// ---------- new-message pop-up ----------
+// A big pop-up for every new message, so nobody misses one. "Later" hides it until the next new message.
+const popKey = () => `jrp-pop-seen-${me ? me.id : 0}`;
+function popSeen() { try { return Number(localStorage.getItem(popKey()) || 0); } catch { return popSeenMem; } }
+let popSeenMem = 0;
+function setPopSeen(id) { popSeenMem = id; try { localStorage.setItem(popKey(), String(id)); } catch { /* private mode */ } }
+
+function beep() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    beep.ctx = beep.ctx || new Ctx();
+    const ctx = beep.ctx;
+    [0, 0.18].forEach((t, i) => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.frequency.value = i ? 1046 : 784;
+      g.gain.setValueAtTime(0.0001, ctx.currentTime + t);
+      g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + t + 0.16);
+      o.connect(g).connect(ctx.destination);
+      o.start(ctx.currentTime + t);
+      o.stop(ctx.currentTime + t + 0.17);
+    });
+  } catch { /* sound not allowed yet */ }
+  try { if (navigator.vibrate) navigator.vibrate([120, 60, 120]); } catch { /* not supported */ }
+}
+
+function closePopup() { const el = document.getElementById('msg-pop'); if (el) el.remove(); }
+
+function maybePopup(info) {
+  const m = info && info.newest;
+  if (!m || m.id <= popSeen()) return;
+  const here = `#/chat/${encodeURIComponent(m.channel)}`;
+  if (location.hash === here && document.visibilityState === 'visible') { setPopSeen(m.id); return; } // already reading it
+  const existing = document.getElementById('msg-pop');
+  if (existing && Number(existing.dataset.id) === m.id) return;
+  closePopup();
+  const isAnn = m.kind === 'announce';
+  const heading = isAnn ? '📢 Announcement' : m.kind === 'team' ? '💬 Team chat' : '💬 New message';
+  const more = info.total - 1;
+  const el = document.createElement('div');
+  el.id = 'msg-pop';
+  el.className = `msg-pop${isAnn ? ' is-ann' : ''}`;
+  el.dataset.id = String(m.id);
+  el.setAttribute('role', 'alertdialog');
+  el.setAttribute('aria-labelledby', 'msg-pop-h');
+  el.innerHTML = `
+    <div class="mp-card">
+      <p class="kicker" id="msg-pop-h">${heading}</p>
+      <p class="mp-from">${esc(m.sender_name || 'Management')}<span> · ${esc(fmtAgo(m.created_at))}</span></p>
+      ${m.body ? `<p class="mp-body">${esc(m.body)}</p>` : ''}
+      ${m.client_id ? `<p class="mp-client">About: <b>${esc(m.client_name || 'a client')}</b></p>` : ''}
+      ${more > 0 ? `<p class="muted small">+ ${more} more unread</p>` : ''}
+      <div class="row">
+        <a class="btn" href="${here}" id="mp-open">${isAnn ? 'Open' : 'Open &amp; reply'}</a>
+        <button type="button" class="btn ghost" id="mp-later">${isAnn ? 'Got it' : 'Later'}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(el);
+  const done = () => { setPopSeen(m.id); closePopup(); };
+  el.querySelector('#mp-open').addEventListener('click', done);
+  el.querySelector('#mp-later').addEventListener('click', done);
+  el.addEventListener('click', (e) => { if (e.target === el) done(); });
+  el.querySelector('#mp-open').focus({ preventScroll: true });
+  beep();
+}
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document.getElementById('msg-pop')) document.getElementById('mp-later').click(); });
 
 // ---------- router ----------
 // Every screen change bumps navToken. A screen that finishes loading after the
@@ -161,6 +232,7 @@ function viewLogin() {
     try {
       me = await api('POST', '/api/login', { email: $('#email').value, password: $('#password').value });
       go('#/');
+      setTimeout(refreshUnread, 800);
     } catch (err) {
       $('#login-err').textContent = err.message;
     } finally { btn.disabled = false; }

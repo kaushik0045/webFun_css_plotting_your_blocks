@@ -498,3 +498,27 @@ input[type=date], input[type=time] { min-height: 46px; }
 }
 .thread-head { position: static; }
 .composer .btn { flex: none; white-space: nowrap; padding: 0 20px; min-width: 76px; letter-spacing: .1em; }
+
+/* New-message pop-up: big, centered, hard to miss */
+.msg-pop {
+  position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, .72); padding: 16px; animation: mp-fade .18s ease-out;
+}
+.msg-pop .mp-card {
+  width: min(460px, 100%); background: var(--ink); color: var(--text);
+  border: 1px solid var(--line-2); border-top: 4px solid var(--red); padding: 22px 22px 18px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .6); animation: mp-pop .22s ease-out;
+}
+.msg-pop.is-ann .mp-card { border: 2px solid var(--red); border-top-width: 6px; }
+.msg-pop .mp-from { font: 700 1.25rem/1.25 var(--head); color: #fff; margin: 2px 0 10px; overflow-wrap: anywhere; }
+.msg-pop .mp-from span { font: 400 .85rem var(--body); color: var(--muted); }
+.msg-pop .mp-body {
+  white-space: pre-wrap; overflow-wrap: anywhere; margin: 0 0 12px; max-height: 40vh; overflow: auto;
+  background: var(--ink-2); border-left: 3px solid var(--red); padding: 10px 12px; font-size: 1.02rem;
+}
+.msg-pop .mp-client { margin: 0 0 10px; }
+.msg-pop .row { display: flex; gap: 10px; margin-top: 14px; }
+.msg-pop .row .btn { flex: 1; text-align: center; justify-content: center; }
+@keyframes mp-fade { from { opacity: 0; } }
+@keyframes mp-pop { from { transform: translateY(14px) scale(.97); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .msg-pop, .msg-pop .mp-card { animation: none; } }

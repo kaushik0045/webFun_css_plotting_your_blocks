@@ -256,11 +256,19 @@ app.get('/api/chat', requireAuth, (req, res) => {
 app.get('/api/chat/unread', requireAuth, (req, res) => {
   const chans = myChannels(req.user);
   let total = 0;
-  for (const c of chans) total += unreadIn(req.user.id, c.channel);
+  let newest = null; // the newest unread message from anyone, for the pop-up
+  for (const c of chans) {
+    const n = unreadIn(req.user.id, c.channel);
+    if (!n) continue;
+    total += n;
+    const m = db.prepare(`${msgSelect} WHERE m.channel = ? AND (m.sender_id IS NULL OR m.sender_id != ?) ORDER BY m.id DESC LIMIT 1`)
+      .get(c.channel, req.user.id);
+    if (m && (!newest || m.id > newest.id)) newest = { ...m, kind: c.kind, title: c.title };
+  }
   const announce = unreadIn(req.user.id, 'announce');
   let latest = null;
   if (announce) latest = db.prepare(`${msgSelect} WHERE m.channel = 'announce' ORDER BY m.id DESC LIMIT 1`).get();
-  res.json({ total, announce, latest_announcement: latest || null });
+  res.json({ total, announce, latest_announcement: latest || null, newest });
 });
 
 function seenStats(msgs) {
