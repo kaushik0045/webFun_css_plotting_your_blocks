@@ -248,3 +248,17 @@ test('empty app: login explains that no logins exist yet', async () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('buyer without funds: wrong type is still "not a fit"; right type ranks by other details', () => {
+  const noFunds = buyer({ property_types: ['Gas station'], states: 'CA', brands: ['Unbranded'] });
+  const house = listing({ asking_price: 500000, property_type: 'Single-family home' });
+  const wrong = compare(noFunds, house);
+  assert.equal(wrong.level, 'poor');
+  assert.ok(wrong.score <= 30);
+  const station = compare(noFunds, gasStation(1000000, { brand: 'Unbranded' }));
+  assert.equal(station.level, 'incomplete');
+  assert.equal(station.label, "Missing: buyer's funds");
+  assert.ok(station.fitSoFar > 0);
+  const chevron = compare(noFunds, gasStation(1000000, { brand: 'Chevron' }));
+  assert.ok(station.fitSoFar > chevron.fitSoFar, 'better brand fit ranks higher');
+});

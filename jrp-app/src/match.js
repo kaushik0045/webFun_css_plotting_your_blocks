@@ -194,13 +194,22 @@ function compare(buyer, listing, explain = true) {
     return part;
   });
   const counted = parts.filter((p) => p.score !== null);
-  const requiredMissing = MATCH_RULES.some((r) => r.required && parts.find((p) => p.key === r.key).status === 'missing');
-  if (requiredMissing || !counted.length) {
-    return { score: null, level: 'incomplete', label: 'Not enough info', parts, math: null };
-  }
-  const totalWeight = counted.reduce((a, p) => a + p.weight, 0);
-  let score = Math.round(counted.reduce((a, p) => a + p.score * p.weight, 0) / totalWeight);
+  const missingRequired = MATCH_RULES.filter((r) => r.required && parts.find((p) => p.key === r.key).status === 'missing');
   const broken = MATCH_RULES.filter((r) => r.dealBreaker && parts.find((p) => p.key === r.key).status === 'miss');
+  const totalWeight = counted.reduce((a, p) => a + p.weight, 0);
+  const weighted = counted.length ? Math.round(counted.reduce((a, p) => a + p.score * p.weight, 0) / totalWeight) : null;
+  // A deal-breaker (wrong property type or state) means "not a fit" even if the price is still unknown.
+  if (missingRequired.length && !broken.length || !counted.length) {
+    const need = missingRequired.length
+      ? parts.filter((p) => missingRequired.some((r) => r.key === p.key)).map((p) => p.text || '').filter(Boolean)
+      : [];
+    const missingLabel = parts.find((p) => p.key === 'price' && p.status === 'missing')
+      ? `Missing: ${[blank(listing.details.asking_price) && 'asking price', blank(buyer.details.budget_max) && "buyer's funds"].filter(Boolean).join(' & ')}`
+      : 'Not enough info';
+    // "fitSoFar" ranks the incomplete ones: how well everything else lines up.
+    return { score: null, level: 'incomplete', label: missingLabel, fitSoFar: weighted, need, parts, math: null };
+  }
+  let score = weighted;
   const capped = broken.length > 0 && score > 30;
   if (capped) score = 30;
   const lvl = levelFor(score);
@@ -238,7 +247,7 @@ function loadListings(db) {
 }
 
 const ORDER = { great: 0, good: 1, average: 2, poor: 3, incomplete: 4 };
-const sortMatches = (a, b) => (ORDER[a.level] - ORDER[b.level]) || ((b.score ?? -1) - (a.score ?? -1));
+const sortMatches = (a, b) => (ORDER[a.level] - ORDER[b.level]) || ((b.score ?? b.fitSoFar ?? -1) - (a.score ?? a.fitSoFar ?? -1));
 
 function buyerSummary(b) {
   return { id: b.id, name: b.name, agent_name: b.agent_name, assigned_agent_id: b.assigned_agent_id,

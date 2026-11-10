@@ -499,7 +499,7 @@ function answersHtml(list, values, emptyMsg) {
   const missing = asked.length - answered.length;
   return `<ul class="contact-list">${answered.map((q) => `
       <li><span class="k">${esc(q.label)}</span><span class="v" style="white-space:pre-wrap">${esc(fmtAnswer(q, values[q.key]))}</span></li>`).join('')}
-    </ul>${missing ? `<p class="muted small" style="margin:8px 0 0">${missing} question${missing === 1 ? '' : 's'} not answered yet.</p>` : ''}`;
+    </ul>${missing ? `<p class="muted small" style="margin:8px 0 0">Not answered yet: ${asked.filter((q) => isEmpty(values[q.key])).map((q) => `<b>${esc(q.label)}</b>`).join(', ')}</p>` : ''}`;
 }
 
 // Form inputs built from the question list in src/questions.js.
@@ -548,7 +548,7 @@ const STATUS_ICON = { match: '✓', partial: '~', miss: '✕', missing: '?', any
 function meterHtml(m) {
   const w = m.score === null ? 100 : Math.max(4, m.score);
   return `<div class="meter lvl-${esc(m.level)}">
-      <div class="meter-top"><span class="meter-label">${esc(m.label)}</span><span class="meter-score">${m.score === null ? '—' : `${m.score}/100`}</span></div>
+      <div class="meter-top"><span class="meter-label">${esc(m.label)}</span><span class="meter-score">${m.score !== null ? `${m.score}/100` : m.fitSoFar !== null && m.fitSoFar !== undefined ? `Other details fit ${m.fitSoFar}%` : '—'}</span></div>
       <div class="meter-bar"><span style="width:${w}%"></span></div>
     </div>`;
 }
@@ -574,7 +574,7 @@ function whyHtml(m) {
       <li class="st-${esc(x.status)}"><span class="ic" aria-hidden="true">${STATUS_ICON[x.status] || '–'}</span>
         <div><b>${esc(x.label)}</b>${x.score !== null ? ` <span class="muted small">${x.score}/100</span>` : ''}
         <div class="small">${esc(x.text)}</div></div></li>`).join('');
-  let math = '<p class="score-math small">Fill in the missing answers to get a score.</p>';
+  let math = `<p class="score-math small">${m.fitSoFar !== null && m.fitSoFar !== undefined ? `Everything else that can be compared fits ${m.fitSoFar}%. ` : ''}Fill in the missing answers (marked ?) to get a full score.</p>`;
   if (m.math) {
     const raw = Math.round(m.math.lines.reduce((a, l) => a + (l.score * l.weightPct) / 100, 0));
     math = `<p class="score-math small">Score: ${m.math.lines.map((l) => `${esc(l.label)} ${l.score} × ${l.weightPct}%`).join(' + ')} = <b>${raw}/100</b>
