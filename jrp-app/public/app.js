@@ -609,7 +609,8 @@ function questionFields(list, values, prefix) {
     } else if (q.type === 'multiselect') {
       const ok = allowedOptions(q, values);
       const by = q.optionsBy ? ` data-opts-by="${prefix}-${esc(q.optionsBy.key)}" data-q="${esc(q.key)}"` : '';
-      input = `<div class="checks" id="${id}" role="group" aria-label="${esc(q.label)}"${by}>${q.options.map((o) => `
+      const ordered = [...ok, ...q.options.filter((o) => !ok.includes(o))]; // the fitting types first, in their own order
+      input = `<div class="checks" id="${id}" role="group" aria-label="${esc(q.label)}"${by}>${ordered.map((o) => `
         <label class="check" ${ok.includes(o) ? '' : 'hidden'}><input type="checkbox" value="${esc(o)}" ${Array.isArray(v) && v.includes(o) ? 'checked' : ''}><span>${esc(o)}</span></label>`).join('')}</div>`;
     } else if (q.type === 'textarea') {
       input = `<textarea id="${id}" maxlength="2000">${esc(v)}</textarea>`;
@@ -619,7 +620,7 @@ function questionFields(list, values, prefix) {
     const cond = q.showIf
       ? ` data-showif="${prefix}-${esc(q.showIf.key)}" data-in="${esc((q.showIf.in || [q.showIf.equals]).join('|'))}" ${isShown(q, values) ? '' : 'hidden'}`
       : '';
-    return `<div class="field"${cond}>${q.type === 'multiselect' ? `<span class="label">${esc(q.label)}</span>` : `<label for="${id}">${esc(q.label)}</label>`}${input}${help}</div>`;
+    return `<div class="field${q.lead ? ' q-lead' : ''}"${cond}>${q.type === 'multiselect' ? `<span class="label">${esc(q.label)}</span>` : `<label for="${id}">${esc(q.label)}</label>`}${input}${help}</div>`;
   }).join('');
 }
 
@@ -736,11 +737,14 @@ document.addEventListener('change', (e) => {
       const keep = ok.includes(el.value) ? el.value : '';
       el.innerHTML = optionTags(ok, keep); // rebuilt, because iPhones ignore hidden <option>s
     } else {
-      $$('label.check', el).forEach((l) => {
+      const labels = $$('label.check', el);
+      labels.forEach((l) => {
         const show = ok.includes(l.querySelector('input').value);
         l.hidden = !show;
         if (!show) l.querySelector('input').checked = false;
       });
+      // put the fitting types in their natural order (Single-family first, or Gas station first)
+      ok.forEach((v) => { const l = labels.find((x) => x.querySelector('input').value === v); if (l) el.appendChild(l); });
     }
   });
 });

@@ -303,11 +303,15 @@ function inferCategory(questions, d) {
   const types = Array.isArray(d.property_types) ? d.property_types : d.property_type ? [d.property_type] : [];
   const cats = [...new Set(types.map(categoryOfType).filter(Boolean))];
   let cat = cats.length === 1 ? cats[0] : cats.length > 1 && catQ.options.includes('Both') ? 'Both' : null;
+  if (!cat && types.length) cat = catQ.options.includes('Both') ? 'Both' : 'Commercial'; // e.g. only "Land / Lot"
   if (!cat) {
     const commercialOnly = questions.some((q) => q.showIf && q.showIf.key === 'category' && q.showIf.in
       && q.showIf.in.includes('Commercial') && !q.showIf.in.includes('Residential') && !blank(d[q.key]));
     if (commercialOnly) cat = 'Commercial';
   }
+  // Any other saved answers: pick a neutral choice so nothing is hidden or lost
+  // (buyers: Both; sellers: Commercial, JRP's main business — agents can change it).
+  if (!cat && questions.some((q) => q.key !== 'category' && !blank(d[q.key]))) cat = catQ.options.includes('Both') ? 'Both' : 'Commercial';
   if (cat) d.category = cat;
   return d;
 }

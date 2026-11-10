@@ -59,11 +59,12 @@ const YES_NO_APPLIED = ['Yes', 'No', 'Applied for'];
 // JRP's seller questions (asked for each property). The property's address is
 // already stored with the property, so it is not asked again here.
 const SELLER_QUESTIONS = [
+  { key: 'category', label: 'Selling residential or commercial?', type: 'select', options: CATEGORIES, lead: true,
+    help: 'Pick one to see the questions for this property.' },
   { key: 'listing_status', label: 'Listing status', type: 'select', options: LISTING_STATUSES,
     help: 'Only "For sale" properties are matched with buyers.' },
-  { key: 'category', label: 'Residential or commercial?', type: 'select', options: CATEGORIES },
   { key: 'property_type', label: 'Property type', type: 'select', options: PROPERTY_TYPES,
-    optionsBy: { key: 'category', groups: TYPES_BY_CATEGORY }, help: 'Pick residential or commercial first to see the right types.' },
+    optionsBy: { key: 'category', groups: TYPES_BY_CATEGORY }, },
   { key: 'asking_price', label: 'Asking price', type: 'money' },
   { key: 'bedrooms', label: 'Bedrooms', type: 'number', showIf: RESIDENTIAL_ONLY },
   { key: 'bathrooms', label: 'Bathrooms', type: 'number', showIf: RESIDENTIAL_ONLY },
@@ -108,7 +109,8 @@ const STATES = {
 
 // JRP's buyer questions (asked once per buyer).
 const BUYER_QUESTIONS = [
-  { key: 'category', label: 'Interested in residential or commercial?', type: 'select', options: ['Residential', 'Commercial', 'Both'] },
+  { key: 'category', label: 'Property interested in: residential or commercial?', type: 'select', options: ['Residential', 'Commercial', 'Both'], lead: true,
+    help: 'Pick one to see the rest of the questions.' },
   { key: 'property_types', label: 'Property types wanted', type: 'multiselect', options: PROPERTY_TYPES,
     optionsBy: { key: 'category', groups: TYPES_BY_CATEGORY },
     help: 'Leave all unticked if they are open to any type.' },
@@ -126,6 +128,11 @@ const BUYER_QUESTIONS = [
   { key: 'experience_years', label: 'How many years?', type: 'number', showIf: { key: 'business_experience', equals: 'yes' } },
   { key: 'additional_info', label: 'Additional info', type: 'textarea' },
 ];
+
+// Everything else waits until Residential / Commercial is picked.
+const GATE = (list, choices) => list.forEach((q) => { if (q.key !== 'category' && !q.showIf) q.showIf = { key: 'category', in: choices }; });
+GATE(SELLER_QUESTIONS, CATEGORIES);
+GATE(BUYER_QUESTIONS, ['Residential', 'Commercial', 'Both']);
 
 // ----------------------------------------------------------------------------
 //  MATCH RULES — how a buyer is compared with a property for sale.

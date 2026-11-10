@@ -525,3 +525,7 @@ input[type=date], input[type=time] { min-height: 46px; }
 .push-ask { border-left: 4px solid var(--red); }
 .push-ask p { margin: 4px 0 10px; }
 #push-card .row { display: flex; flex-wrap: wrap; gap: 10px; }
+
+/* First question (Residential / Commercial): stands out, the rest appears after it */
+.field.q-lead { border: 2px solid var(--red); background: rgba(225, 6, 0, .08); padding: 14px 14px 12px; }
+.field.q-lead > label { font-size: .95rem; color: #fff; }
