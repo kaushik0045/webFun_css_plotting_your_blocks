@@ -64,6 +64,18 @@ jrp-app/
 
 ---
 
+## Team directory and office chat
+
+- **Team directory** (Team tab, admins only): every employee's job title, login email, phone, last login, assigned clients and overdue reminders, with Call / Text / Message buttons. **Passwords are stored one-way scrambled and can never be shown**; use **Reset password** to create a new temporary one (shown once, with a button to text it), which also logs that person out everywhere.
+- **Chat** (inside the app only):
+  - 📢 **Announcements**: admins post, everyone reads; admins see "Seen by X of Y" and who hasn't read it. New announcements also show on everyone's home screen.
+  - 💬 **Team chat**: the whole office.
+  - 👤 **Direct messages**: private between two people (admins cannot read other people's direct messages).
+  - **Send to a colleague** on any client profile shares the client as a tappable card.
+  - New messages appear within a few seconds; the Chat tab shows an unread count.
+
+---
+
 ## Part 2: Run it on your own computer
 
 1. Install **Node.js 22.13 or newer** from https://nodejs.org (the LTS version is fine).

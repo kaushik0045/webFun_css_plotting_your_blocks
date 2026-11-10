@@ -72,6 +72,19 @@ function setNav(active) {
   $$('.topnav a').forEach((a) => a.classList.toggle('active', a.dataset.nav === active));
 }
 
+// ---------- chat badge: checks for new messages every 15 seconds while the app is open ----------
+let unreadInfo = { total: 0, announce: 0, latest_announcement: null };
+async function refreshUnread() {
+  if (!me || document.visibilityState === 'hidden') return;
+  try {
+    unreadInfo = await api('GET', '/api/chat/unread');
+    const b = document.getElementById('chat-badge');
+    if (b) { b.hidden = !unreadInfo.total; b.textContent = unreadInfo.total > 99 ? '99+' : String(unreadInfo.total); }
+  } catch { /* offline or logged out */ }
+}
+setInterval(refreshUnread, 15000);
+document.addEventListener('visibilitychange', refreshUnread);
+
 // ---------- router ----------
 // Every screen change bumps navToken. A screen that finishes loading after the
 // person has already moved on checks it and quietly does nothing.
@@ -80,6 +93,7 @@ let navToken = 0;
 const onPage = (hash) => (location.hash || '#/') === hash;
 async function route() {
   navToken += 1;
+  if (chatPoll) { clearInterval(chatPoll); chatPoll = null; }
   whyStore.clear();
   const hash = location.hash || '#/';
   if (!me && hash !== '#/login') {
@@ -89,12 +103,15 @@ async function route() {
   window.scrollTo(0, 0);
   try {
     if (parts[0] === 'login') return await viewLogin();
+    refreshUnread();
     if (parts[0] === '' ) return await viewSearch();
     if (parts[0] === 'new') return await viewClientForm(null);
     if (parts[0] === 'client' && parts[1] && parts[2] === 'edit') return await viewClientForm(Number(parts[1]));
     if (parts[0] === 'client' && parts[1]) return await viewClient(Number(parts[1]));
     if (parts[0] === 'property' && parts[1]) return await viewProperty(Number(parts[1]), parts[2] === 'edit');
     if (parts[0] === 'matches') return await viewMatches();
+    if (parts[0] === 'chat' && parts[1]) return await viewThread(decodeURIComponent(parts.slice(1).join('/')));
+    if (parts[0] === 'chat') return await viewChatList();
     if (parts[0] === 'admin') return await viewAdmin();
     if (parts[0] === 'account') return await viewAccount();
     $app.innerHTML = '<div class="empty">Page not found. <a href="#/">Go to search</a></div>';
@@ -156,11 +173,19 @@ const searchState = { q: '', type: 'all', agent: '' };
 async function viewSearch() {
   const navAt = navToken;
   setNav('search');
-  const [team, myRem] = await Promise.all([agents(), api('GET', '/api/reminders')]);
+  const [team, myRem, unread] = await Promise.all([agents(), api('GET', '/api/reminders'), api('GET', '/api/chat/unread')]);
+  const ann = unread.latest_announcement;
   if (navAt !== navToken || !onPage('#/')) return;
   $app.innerHTML = `
     <p class="kicker">Client Book</p>
     <h1>Hi, ${esc(me.name.split(' ')[0])}</h1>
+    ${ann ? `
+    <a class="card announce-banner" href="#/chat/announce">
+      <span class="ab-k">📢 New announcement${unread.announce > 1 ? `s (${unread.announce})` : ''}</span>
+      <span class="ab-from">${esc(ann.sender_name || 'Management')} · ${esc(fmtAgo(ann.created_at))}</span>
+      <span class="ab-body">${esc(ann.body)}</span>
+      <span class="ab-open">Open →</span>
+    </a>` : ''}
     ${myRem.length ? `
     <div class="card my-reminders">
       <h2>My reminders <span class="count">${myRem.length}</span></h2>
@@ -704,8 +729,12 @@ async function viewClient(id) {
         ${c.email ? `<a class="btn small ghost" href="mailto:${esc(c.email)}">Email</a>` : '<span></span>'}
       </div>
       ${c.reminders.length ? `<ul class="rem-list">${c.reminders.map((r) => reminderLine(r)).join('')}</ul>` : ''}
-      <button type="button" class="btn small ghost block rem-add" id="add-reminder">⏰ Set a reminder to call</button>
+      <div class="grid2 head-actions">
+        <button type="button" class="btn small ghost" id="add-reminder">⏰ Set a reminder</button>
+        <button type="button" class="btn small ghost" id="share-client">💬 Send to a colleague</button>
+      </div>
       <div id="rem-slot"></div>
+      <div id="share-slot"></div>
     </div>
 
     ${c.type === 'buyer' && c.details.exchange_1031 === 'yes' && !dismissed1031(c.id) ? `
@@ -772,6 +801,7 @@ async function viewClient(id) {
 
   bindLog(`/api/clients/${id}`, () => viewClient(id), who);
   bindReminderDone(() => viewClient(id));
+  $('#share-client').addEventListener('click', () => openShareBox(c));
   $('#add-reminder').addEventListener('click', () => {
     const slot = $('#rem-slot');
     if ($('#reminder-box')) return;
@@ -1052,70 +1082,302 @@ async function viewClientForm(id) {
 function openDialog(d) { if (typeof d.showModal === 'function') d.showModal(); else { d.setAttribute('open', ''); d.classList.add('fallback-open'); } }
 function closeDialog(d) { if (typeof d.close === 'function') d.close(); else { d.removeAttribute('open'); d.classList.remove('fallback-open'); } }
 
-// ---------- admin: team ----------
+// ---------- admin: team directory ----------
+const initials = (name) => String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
+const avatarHue = (id) => (Number(id) * 67) % 360;
+const avatar = (id, name, cls = '') => `<span class="avatar ${cls}" style="--h:${avatarHue(id)}" aria-hidden="true">${esc(initials(name))}</span>`;
+const smsUrl = (phone, body = '') => `sms:${String(phone).replace(/[^\d+]/g, '')}${body ? `?&body=${encodeURIComponent(body)}` : ''}`;
+
 async function viewAdmin() {
   const navAt = navToken;
   setNav('admin');
   if (me.role !== 'admin') { $app.innerHTML = '<div class="empty">Admins only.</div>'; return; }
   const users = await api('GET', '/api/admin/users');
   if (navAt !== navToken || !onPage('#/admin')) return;
+  const active = users.filter((u) => u.active).length;
   $app.innerHTML = `
-    <div class="spread"><h1>Team logins</h1><button class="btn small" id="add-user">+ Add employee</button></div>
-    <p class="muted small">${users.filter((u) => u.active).length} active employees. Turning someone off logs them out right away and keeps their comment history.</p>
-    <div class="card">
-      <table class="table">
-        <thead><tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr></thead>
-        <tbody>
-          ${users.map((u) => `
-            <tr>
-              <td><b>${esc(u.name)}</b> ${u.active ? '' : '<span class="badge off">Off</span>'}</td>
-              <td class="small">${esc(u.email)}</td>
-              <td>${u.role === 'admin' ? '<span class="badge admin">Admin</span>' : 'Staff'}</td>
-              <td style="text-align:right"><button class="btn small ghost" data-edit-user="${u.id}">Manage</button></td>
-            </tr>`).join('')}
-        </tbody>
-      </table>
+    <p class="kicker">Admins only</p>
+    <div class="spread"><h1>Team directory</h1><button class="btn small" id="add-user">+ Add employee</button></div>
+    <p class="muted small">${active} active of ${users.length}. Passwords are stored scrambled and can't be viewed by anyone. Use <b>Reset password</b> to give someone a new one.</p>
+    <div class="row" style="margin:10px 0 14px">
+      <input id="team-q" type="search" placeholder="Find an employee" aria-label="Find an employee" style="flex:1;min-width:180px">
+      <a class="btn small ghost" href="#/chat/announce">📢 Broadcast to all</a>
+    </div>
+    <div class="emp-grid" id="emp-grid">
+      ${users.map((u) => `
+        <div class="card emp ${u.active ? '' : 'off'}" data-q="${esc(`${u.name} ${u.email} ${u.title || ''} ${u.phone || ''}`.toLowerCase())}">
+          <div class="emp-head">
+            ${avatar(u.id, u.name, 'lg')}
+            <div class="emp-id">
+              <h2>${esc(u.name)}${u.id === me.id ? ' <span class="muted small">(you)</span>' : ''}</h2>
+              <span class="muted small">${esc(u.title || (u.role === 'admin' ? 'Admin' : 'Agent'))}</span>
+              <div>${u.role === 'admin' ? '<span class="badge admin">Admin</span>' : '<span class="badge buyer">Staff</span>'} ${u.active ? '' : '<span class="badge off">Switched off</span>'}</div>
+            </div>
+          </div>
+          <ul class="contact-list">
+            <li><span class="k">Login email</span><span class="v">${esc(u.email)}</span></li>
+            <li><span class="k">Phone</span><span class="v">${u.phone ? `<a href="${esc(telUrl(u.phone))}">${esc(u.phone)}</a>` : '<span class="muted">Not added</span>'}</span></li>
+            <li><span class="k">Last login</span><span class="v">${u.last_login_at ? esc(fmtAgo(u.last_login_at)) : '<span class="muted">Never</span>'}</span></li>
+            <li><span class="k">Clients</span><span class="v">${u.client_count} assigned${u.overdue_reminders ? ` · <span class="warn">${u.overdue_reminders} overdue reminder${u.overdue_reminders === 1 ? '' : 's'}</span>` : ''}</span></li>
+          </ul>
+          <div class="quick">
+            ${u.phone ? `<a class="btn small" href="${esc(telUrl(u.phone))}">Call</a>` : '<span class="btn small ghost disabled">No phone</span>'}
+            ${u.phone ? `<a class="btn small ghost" href="${esc(smsUrl(u.phone))}">Text</a>` : '<span></span>'}
+            ${u.id !== me.id && u.active ? `<a class="btn small ghost" href="#/chat/${encodeURIComponent(dmChannel(me.id, u.id))}">Message</a>` : '<span></span>'}
+          </div>
+          <div class="grid2" style="margin-top:8px">
+            <button class="btn small ghost" data-edit-user="${u.id}">Edit details</button>
+            <button class="btn small ghost" data-reset-user="${u.id}">Reset password</button>
+          </div>
+        </div>`).join('')}
     </div>
     <dialog id="user-dlg"><form id="user-form" method="dialog"></form></dialog>`;
+
+  $('#team-q').addEventListener('input', (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    $$('#emp-grid .emp').forEach((c) => { c.hidden = q && !c.dataset.q.includes(q); });
+  });
 
   const dlg = $('#user-dlg');
   const form = $('#user-form');
   const open = (u) => {
     form.innerHTML = `
-      <h2>${u ? `Manage ${esc(u.name)}` : 'Add employee'}</h2>
+      <h2>${u ? `Edit ${esc(u.name)}` : 'Add employee'}</h2>
       <div class="field"><label for="u-name">Name</label><input id="u-name" required maxlength="100" value="${esc(u?.name)}"></div>
-      ${u ? '' : '<div class="field"><label for="u-email">Work email</label><input id="u-email" type="email" required maxlength="200"></div>'}
+      <div class="grid2">
+        <div class="field"><label for="u-title">Job title</label><input id="u-title" maxlength="80" placeholder="e.g. Sales Agent" value="${esc(u?.title)}"></div>
+        <div class="field"><label for="u-phone">Phone</label><input id="u-phone" type="tel" maxlength="50" value="${esc(u?.phone)}"></div>
+      </div>
+      ${u ? '' : '<div class="field"><label for="u-email">Work email (their login)</label><input id="u-email" type="email" required maxlength="200"></div>'}
       <div class="field"><label for="u-role">Role</label><select id="u-role">
-        <option value="staff" ${u?.role !== 'admin' ? 'selected' : ''}>Staff: search, add, edit, comment</option>
-        <option value="admin" ${u?.role === 'admin' ? 'selected' : ''}>Admin: also manages team and can delete</option></select></div>
+        <option value="staff" ${u?.role !== 'admin' ? 'selected' : ''}>Staff: search, add, edit, comment, chat</option>
+        <option value="admin" ${u?.role === 'admin' ? 'selected' : ''}>Admin: also team directory, announcements, delete</option></select></div>
       ${u ? `<div class="field"><label for="u-active">Access</label><select id="u-active">
         <option value="1" ${u.active ? 'selected' : ''}>Active (can log in)</option>
-        <option value="0" ${u.active ? '' : 'selected'}>Off (blocked)</option></select></div>` : ''}
-      <div class="field"><label for="u-pw">${u ? 'Reset password (leave blank to keep)' : 'Temporary password (min 8 characters)'}</label>
-        <input id="u-pw" type="text" minlength="8" autocomplete="new-password" ${u ? '' : 'required'}></div>
+        <option value="0" ${u.active ? '' : 'selected'}>Off (blocked right away)</option></select></div>`
+    : '<div class="field"><label for="u-pw">Temporary password (min 8 characters)</label><input id="u-pw" type="text" minlength="8" autocomplete="new-password" required></div>'}
       <p class="error" id="u-err"></p>
       <div class="row"><button class="btn" value="save" type="submit">Save</button><button class="btn ghost" type="button" id="u-cancel">Cancel</button></div>`;
     $('#u-cancel').addEventListener('click', () => closeDialog(dlg));
     form.onsubmit = async (e) => {
       e.preventDefault();
       try {
-        if (u) {
-          await api('PATCH', `/api/admin/users/${u.id}`, {
-            name: $('#u-name').value, role: $('#u-role').value, active: $('#u-active').value === '1', password: $('#u-pw').value,
-          });
-        } else {
-          await api('POST', '/api/admin/users', {
-            name: $('#u-name').value, email: $('#u-email').value, role: $('#u-role').value, password: $('#u-pw').value,
-          });
-        }
+        const common = { name: $('#u-name').value, title: $('#u-title').value, phone: $('#u-phone').value, role: $('#u-role').value };
+        if (u) await api('PATCH', `/api/admin/users/${u.id}`, { ...common, active: $('#u-active').value === '1' });
+        else await api('POST', '/api/admin/users', { ...common, email: $('#u-email').value, password: $('#u-pw').value });
         agentsCache = null;
         closeDialog(dlg); toast('Saved'); viewAdmin();
       } catch (err) { $('#u-err').textContent = err.message; }
     };
     openDialog(dlg);
   };
+  const showReset = (u) => {
+    form.innerHTML = `
+      <h2>Reset password: ${esc(u.name)}</h2>
+      <p>This makes a <b>new temporary password</b> and logs ${esc(u.name.split(' ')[0])} out of every device. Their old password stops working.</p>
+      <p class="error" id="u-err"></p>
+      <div class="row"><button class="btn" type="submit">Make new password</button><button class="btn ghost" type="button" id="u-cancel">Cancel</button></div>`;
+    $('#u-cancel').addEventListener('click', () => closeDialog(dlg));
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        const r = await api('POST', `/api/admin/users/${u.id}/reset-password`);
+        const text = `Your new JRP Client Book password is ${r.password} (login: ${u.email}). Please change it under "Me" after logging in.`;
+        form.innerHTML = `
+          <h2>New password for ${esc(u.name)}</h2>
+          <p class="new-pw" id="new-pw">${esc(r.password)}</p>
+          <p class="muted small">Shown only now. It can't be looked up again. They can change it under <b>Me</b>.</p>
+          <div class="grid2">
+            <button type="button" class="btn small" id="copy-pw">Copy</button>
+            ${u.phone ? `<a class="btn small ghost" href="${esc(smsUrl(u.phone, text))}">Text it to ${esc(u.name.split(' ')[0])}</a>` : '<span></span>'}
+          </div>
+          <div class="row" style="margin-top:12px"><button type="button" class="btn ghost" id="u-done">Done</button></div>`;
+        $('#copy-pw').addEventListener('click', async () => {
+          try { await navigator.clipboard.writeText(r.password); toast('Copied'); } catch { toast('Select the password and copy it', true); }
+        });
+        $('#u-done').addEventListener('click', () => closeDialog(dlg));
+      } catch (err) { $('#u-err').textContent = err.message; }
+    };
+    openDialog(dlg);
+  };
   $('#add-user').addEventListener('click', () => open(null));
   $$('[data-edit-user]').forEach((b) => b.addEventListener('click', () => open(users.find((u) => u.id === Number(b.dataset.editUser)))));
+  $$('[data-reset-user]').forEach((b) => b.addEventListener('click', () => showReset(users.find((u) => u.id === Number(b.dataset.resetUser)))));
+}
+
+// ---------- office chat ----------
+const dmChannel = (a, b) => `dm:${Math.min(a, b)}-${Math.max(a, b)}`;
+let chatPoll = null;
+const chanIcon = (c) => (c.kind === 'announce' ? '<span class="avatar ann" aria-hidden="true">📢</span>'
+  : c.kind === 'team' ? '<span class="avatar team" aria-hidden="true">👥</span>'
+    : avatar(c.other ? c.other.id : 0, c.title));
+function fmtChatTime(iso) {
+  const d = new Date(iso);
+  if (d.toDateString() === new Date().toDateString()) return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+async function viewChatList() {
+  const navAt = navToken;
+  setNav('chat');
+  const d = await api('GET', '/api/chat');
+  if (navAt !== navToken || !onPage('#/chat')) return;
+  $app.innerHTML = `
+    <p class="kicker">Office chat · inside the app only</p>
+    <h1>Chat</h1>
+    ${me.role === 'admin' ? '<a class="btn small block" href="#/chat/announce" style="margin:6px 0 12px">📢 Send an announcement to everyone</a>' : ''}
+    <input id="chat-q" type="search" placeholder="Find a person" aria-label="Find a person" style="margin-bottom:10px">
+    <ul class="conv-list" id="conv-list">
+      ${d.conversations.map((c) => `
+        <li data-q="${esc(c.title.toLowerCase())}" class="${c.kind === 'dm' && c.other && !c.other.active ? 'off' : ''}">
+          <a class="conv ${c.unread ? 'has-unread' : ''}" href="#/chat/${encodeURIComponent(c.channel)}">
+            ${chanIcon(c)}
+            <span class="conv-main">
+              <span class="conv-top"><b>${esc(c.title)}</b>${c.last ? `<span class="conv-time">${esc(fmtChatTime(c.last.created_at))}</span>` : ''}</span>
+              <span class="conv-last">${c.last
+    ? `${c.last.sender_id === me.id ? 'You: ' : c.kind !== 'dm' ? `${esc((c.last.sender_name || '').split(' ')[0])}: ` : ''}${esc(c.last.body || (c.last.client_name ? `Shared a client: ${c.last.client_name}` : ''))}`
+    : `<span class="muted">${esc(c.subtitle)}</span>`}</span>
+            </span>
+            ${c.unread ? `<span class="unread">${c.unread}</span>` : ''}
+          </a>
+        </li>`).join('')}
+    </ul>`;
+  $('#chat-q').addEventListener('input', (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    $$('#conv-list li').forEach((li) => { li.hidden = q && !li.dataset.q.includes(q); });
+  });
+}
+
+function messageHtml(m, kind, prevMsg) {
+  const mine = m.sender_id === me.id;
+  const day = new Date(m.created_at).toDateString();
+  const sep = !prevMsg || new Date(prevMsg.created_at).toDateString() !== day
+    ? `<li class="day-sep"><span>${esc(day === new Date().toDateString() ? 'Today' : new Date(m.created_at).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }))}</span></li>` : '';
+  const sameAuthor = prevMsg && prevMsg.sender_id === m.sender_id && !sep && (new Date(m.created_at) - new Date(prevMsg.created_at)) < 5 * 60e3;
+  const client = m.client_id ? `<a class="msg-client" href="#/client/${m.client_id}">${badge(m.client_type)} <b>${esc(m.client_name)}</b><span>Open profile →</span></a>` : '';
+  const seen = kind === 'announce' && me.role === 'admin' && m.seen_count !== undefined
+    ? `<button type="button" class="seen" data-seen="${m.id}">Seen by ${m.seen_count} of ${m.audience}</button>` : '';
+  return `${sep}<li class="msg ${mine ? 'mine' : ''} ${kind === 'announce' ? 'ann' : ''} ${sameAuthor ? 'cont' : ''}" data-id="${m.id}">
+      ${!mine && !sameAuthor && kind !== 'dm' ? `<span class="msg-from">${esc(m.sender_name || 'Former employee')}${m.sender_title ? ` · ${esc(m.sender_title)}` : ''}</span>` : ''}
+      <div class="bubble">${m.body ? `<span class="msg-body">${esc(m.body)}</span>` : ''}${client}<span class="msg-time">${esc(new Date(m.created_at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }))}</span></div>
+      ${seen}
+    </li>`;
+}
+
+async function viewThread(channel) {
+  const navAt = navToken;
+  setNav('chat');
+  const hash = `#/chat/${encodeURIComponent(channel)}`;
+  const d = await api('GET', `/api/chat/c/${encodeURIComponent(channel)}`);
+  if (navAt !== navToken || !(onPage(hash) || onPage(`#/chat/${channel}`))) return;
+  const title = d.kind === 'announce' ? 'Announcements' : d.kind === 'team' ? 'Team chat' : d.other.name;
+  const sub = d.kind === 'announce' ? (d.can_post ? 'Everyone in the office receives these' : 'From management. Read only')
+    : d.kind === 'team' ? 'Everyone in the office' : (d.other.title || '') + (d.other.active ? '' : ' · switched off');
+  let msgs = d.messages;
+  $app.innerHTML = `
+    <div class="thread">
+      <div class="thread-head">
+        <a href="#/chat" class="back">← Chat</a>
+        <div class="spread">
+          <div class="row" style="flex-wrap:nowrap">${chanIcon({ kind: d.kind, title, other: d.other })}<div><h1 class="thread-title">${esc(title)}</h1><span class="muted small">${esc(sub)}</span></div></div>
+          ${d.other && d.other.phone ? `<div class="row"><a class="btn small" href="${esc(telUrl(d.other.phone))}">Call</a><a class="btn small ghost" href="${esc(smsUrl(d.other.phone))}">Text</a></div>` : ''}
+        </div>
+      </div>
+      <ul class="msgs" id="msgs">${msgs.length ? msgs.map((m, i) => messageHtml(m, d.kind, msgs[i - 1])).join('') : `<li class="empty">${d.kind === 'dm' ? `Say hi to ${esc(d.other.name.split(' ')[0])} 👋` : 'No messages yet.'}</li>`}</ul>
+      ${d.can_post ? `
+      <form class="composer" id="composer">
+        <textarea id="msg-in" rows="1" maxlength="2000" placeholder="${d.kind === 'announce' ? 'Announcement for everyone…' : 'Message…'}" aria-label="Message"></textarea>
+        <button class="btn" type="submit" aria-label="Send">Send</button>
+      </form>` : '<p class="composer-note">Only admins can post announcements. Message your manager directly if you have a question.</p>'}
+    </div>
+    <dialog id="seen-dlg"><div id="seen-body"></div></dialog>`;
+
+  const list = $('#msgs');
+  const toBottom = () => { list.lastElementChild && list.lastElementChild.scrollIntoView({ block: 'end' }); window.scrollTo(0, document.body.scrollHeight); };
+  toBottom();
+  const lastId = () => (msgs.length ? msgs[msgs.length - 1].id : 0);
+  const append = (newOnes) => {
+    if (!newOnes.length) return;
+    const fresh = newOnes.filter((m) => !msgs.some((x) => x.id === m.id));
+    if (!fresh.length) return;
+    const empty = $('#msgs > .empty'); if (empty) empty.remove();
+    const nearBottom = window.innerHeight + window.scrollY > document.body.scrollHeight - 160;
+    const html = fresh.map((m, i) => messageHtml(m, d.kind, i ? fresh[i - 1] : msgs[msgs.length - 1])).join('');
+    list.insertAdjacentHTML('beforeend', html);
+    msgs = msgs.concat(fresh);
+    if (nearBottom || fresh.some((m) => m.sender_id === me.id)) toBottom();
+  };
+
+  // check for new messages every 4 seconds while this conversation is open
+  chatPoll = setInterval(async () => {
+    if (navAt !== navToken || document.visibilityState === 'hidden') return;
+    try { const r = await api('GET', `/api/chat/c/${encodeURIComponent(channel)}?after=${lastId()}`); append(r.messages); } catch { /* try again later */ }
+  }, 4000);
+
+  list.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-seen]');
+    if (!b) return;
+    try {
+      const r = await api('GET', `/api/chat/announce/${b.dataset.seen}/seen`);
+      $('#seen-body').innerHTML = `<h2>Who has seen it</h2>
+        <p><b>Seen (${r.seen.length}):</b> ${r.seen.map(esc).join(', ') || '—'}</p>
+        <p><b>Not yet (${r.not_seen.length}):</b> ${r.not_seen.map(esc).join(', ') || '—'}</p>
+        <button class="btn small ghost" id="seen-close">Close</button>`;
+      $('#seen-close').addEventListener('click', () => closeDialog($('#seen-dlg')));
+      openDialog($('#seen-dlg'));
+    } catch (err) { toast(err.message, true); }
+  });
+
+  const form = $('#composer');
+  if (!form) return;
+  const input = $('#msg-in');
+  const grow = () => { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 160)}px`; };
+  input.addEventListener('input', grow);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !('ontouchstart' in window)) { e.preventDefault(); form.requestSubmit(); }
+  });
+  let sending = false;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = input.value.trim();
+    if (!body || sending) return;
+    sending = true;
+    const btn = $('button', form); btn.disabled = true;
+    try {
+      const m = await api('POST', `/api/chat/c/${encodeURIComponent(channel)}`, { body });
+      input.value = ''; grow();
+      append([m]);
+    } catch (err) { toast(err.message, true); }
+    sending = false; btn.disabled = false; input.focus();
+  });
+}
+
+// "Send to a colleague" box on a client's profile: shares the client as a card in chat.
+async function openShareBox(c) {
+  const slot = $('#share-slot');
+  if ($('#share-box')) { $('#share-box').remove(); return; }
+  const team = (await agents()).filter((a) => a.id !== me.id);
+  slot.innerHTML = `
+    <form class="reminder-box" id="share-box">
+      <p class="rb-q">💬 Send <b>${esc(c.name)}</b> to…</p>
+      <div class="field"><label for="share-to">To</label>
+        <select id="share-to">
+          ${team.map((a) => `<option value="${esc(dmChannel(me.id, a.id))}">${esc(a.name)}${a.title ? ` (${esc(a.title)})` : ''}</option>`).join('')}
+          <option value="team">Team chat (everyone)</option>
+          ${me.role === 'admin' ? '<option value="announce">📢 Announcement (everyone)</option>' : ''}
+        </select></div>
+      <div class="field"><label for="share-msg">Message (optional)</label><input id="share-msg" maxlength="2000" placeholder="e.g. Can you call this buyer today?"></div>
+      <div class="row"><button class="btn small" type="submit">Send</button><button type="button" class="btn small ghost" id="share-cancel">Cancel</button></div>
+    </form>`;
+  $('#share-cancel').addEventListener('click', () => $('#share-box').remove());
+  $('#share-box').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const to = $('#share-to').value;
+    try {
+      await api('POST', `/api/chat/c/${encodeURIComponent(to)}`, { body: $('#share-msg').value, client_id: c.id });
+      $('#share-box').innerHTML = `<p class="rb-q">✅ Sent. <a href="#/chat/${encodeURIComponent(to)}">Open the conversation →</a></p>`;
+    } catch (err) { toast(err.message, true); }
+  });
 }
 
 // ---------- my account ----------

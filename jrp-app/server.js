@@ -118,6 +118,7 @@ app.post('/api/login', (req, res) => {
   req.session.regenerate((err) => {
     if (err) return fail(res, 500, 'Login failed');
     req.session.userId = user.id;
+    db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?').run(now(), user.id);
     res.json({ id: user.id, name: user.name, email: user.email, role: user.role });
   });
 });
@@ -139,12 +140,15 @@ app.post('/api/me/password', requireAuth, (req, res) => {
 
 // List of employees (for the "assigned agent" dropdown).
 app.get('/api/agents', requireAuth, (req, res) => {
-  res.json(db.prepare('SELECT id, name FROM users WHERE active = 1 ORDER BY name').all());
+  res.json(db.prepare('SELECT id, name, title, role FROM users WHERE active = 1 ORDER BY name').all());
 });
 
 // ---------- admin: manage employees ----------
 app.get('/api/admin/users', requireAuth, requireAdmin, (req, res) => {
-  res.json(db.prepare('SELECT id, name, email, role, active, created_at FROM users ORDER BY active DESC, name').all());
+  res.json(db.prepare(`SELECT u.id, u.name, u.email, u.role, u.active, u.created_at, u.phone, u.title, u.last_login_at,
+      (SELECT COUNT(*) FROM clients c WHERE c.assigned_agent_id = u.id) AS client_count,
+      (SELECT COUNT(*) FROM reminders r WHERE r.user_id = u.id AND r.done_at IS NULL AND r.due_at < strftime('%Y-%m-%dT%H:%M:%SZ','now')) AS overdue_reminders
+    FROM users u ORDER BY u.active DESC, u.name`).all());
 });
 
 app.post('/api/admin/users', requireAuth, requireAdmin, (req, res) => {
@@ -155,8 +159,8 @@ app.post('/api/admin/users', requireAuth, requireAdmin, (req, res) => {
   if (!name || !email.includes('@')) return fail(res, 400, 'Name and a valid email are required');
   if (password.length < 8) return fail(res, 400, 'Password must be at least 8 characters');
   if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(email)) return fail(res, 400, 'That email already has an account');
-  const r = db.prepare('INSERT INTO users (name, email, password_hash, role) VALUES (?,?,?,?)')
-    .run(name, email, bcrypt.hashSync(password, 12), role);
+  const r = db.prepare('INSERT INTO users (name, email, password_hash, role, phone, title) VALUES (?,?,?,?,?,?)')
+    .run(name, email, bcrypt.hashSync(password, 12), role, clean(req.body.phone, 50) || null, clean(req.body.title, 80) || null);
   res.json({ id: r.lastInsertRowid });
 });
 
@@ -170,10 +174,157 @@ app.patch('/api/admin/users/:id', requireAuth, requireAdmin, (req, res) => {
   if (id === req.user.id && (role !== 'admin' || !active)) return fail(res, 400, "You can't remove your own admin access");
   const newPw = typeof req.body.password === 'string' ? req.body.password : '';
   if (newPw && newPw.length < 8) return fail(res, 400, 'Password must be at least 8 characters');
-  db.prepare('UPDATE users SET name = ?, role = ?, active = ? WHERE id = ?').run(name || user.name, role, active, id);
+  const phone = req.body.phone !== undefined ? clean(req.body.phone, 50) || null : user.phone;
+  const title = req.body.title !== undefined ? clean(req.body.title, 80) || null : user.title;
+  db.prepare('UPDATE users SET name = ?, role = ?, active = ?, phone = ?, title = ? WHERE id = ?').run(name || user.name, role, active, phone, title, id);
   if (newPw) db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(newPw, 12), id);
   // Deactivated users are logged out automatically: requireAuth checks "active" on every request.
   res.json({ ok: true });
+});
+
+// Reset a password: makes a new temporary one, shown to the admin once (it is never stored readable).
+const PW_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+function tempPassword() {
+  let out = '';
+  const bytes = crypto.randomBytes(10);
+  for (const b of bytes) out += PW_CHARS[b % PW_CHARS.length];
+  return `${out.slice(0, 5)}-${out.slice(5)}`;
+}
+app.post('/api/admin/users/:id/reset-password', requireAuth, requireAdmin, (req, res) => {
+  const user = db.prepare('SELECT id, name FROM users WHERE id = ?').get(Number(req.params.id));
+  if (!user) return fail(res, 404, 'Not found');
+  const pw = tempPassword();
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(pw, 12), user.id);
+  // log them out everywhere (exact match on this user's id, so user 1 doesn't also hit 10, 11, ...)
+  for (const row of db.prepare('SELECT sid, data FROM sessions').all()) {
+    try { if (JSON.parse(row.data).userId === user.id) db.prepare('DELETE FROM sessions WHERE sid = ?').run(row.sid); } catch { /* skip bad rows */ }
+  }
+  res.json({ password: pw });
+});
+
+// ---------- office chat ----------
+// Channels: 'announce' (admins post, all read), 'team' (everyone), 'dm:<low>-<high>' (two people only).
+function parseChannel(ch, me) {
+  if (ch === 'announce' || ch === 'team') return { ch, kind: ch };
+  const m = /^dm:(\d+)-(\d+)$/.exec(String(ch || ''));
+  if (!m) return null;
+  const a = Number(m[1]); const b = Number(m[2]);
+  if (a >= b || (me.id !== a && me.id !== b)) return null; // only the two people in it
+  return { ch, kind: 'dm', otherId: me.id === a ? b : a };
+}
+const dmChannel = (x, y) => `dm:${Math.min(x, y)}-${Math.max(x, y)}`;
+const lastReadStmt = () => db.prepare('SELECT last_read_id FROM chat_reads WHERE user_id = ? AND channel = ?');
+function markRead(userId, ch, id) {
+  db.prepare(`INSERT INTO chat_reads (user_id, channel, last_read_id) VALUES (?,?,?)
+    ON CONFLICT(user_id, channel) DO UPDATE SET last_read_id = MAX(last_read_id, excluded.last_read_id)`).run(userId, ch, id);
+}
+function unreadIn(userId, ch) {
+  const lr = (lastReadStmt().get(userId, ch) || { last_read_id: 0 }).last_read_id;
+  return db.prepare('SELECT COUNT(*) AS n FROM messages WHERE channel = ? AND id > ? AND (sender_id IS NULL OR sender_id != ?)').get(ch, lr, userId).n;
+}
+function myChannels(user) {
+  const people = db.prepare('SELECT id, name, title, role, active FROM users WHERE id != ? ORDER BY name').all(user.id);
+  const list = [
+    { channel: 'announce', kind: 'announce', title: 'Announcements', subtitle: 'From management to everyone' },
+    { channel: 'team', kind: 'team', title: 'Team chat', subtitle: 'Everyone in the office' },
+  ];
+  for (const p of people) {
+    const ch = dmChannel(user.id, p.id);
+    // show switched-off colleagues only if there is history with them
+    if (!p.active && !db.prepare('SELECT 1 FROM messages WHERE channel = ? LIMIT 1').get(ch)) continue;
+    list.push({ channel: ch, kind: 'dm', title: p.name, subtitle: p.title || (p.role === 'admin' ? 'Admin' : 'Agent'), other: p });
+  }
+  return list;
+}
+const msgSelect = `SELECT m.id, m.channel, m.body, m.created_at, m.sender_id, u.name AS sender_name, u.title AS sender_title,
+    m.client_id, c.name AS client_name, c.type AS client_type
+  FROM messages m LEFT JOIN users u ON u.id = m.sender_id LEFT JOIN clients c ON c.id = m.client_id`;
+
+app.get('/api/chat', requireAuth, (req, res) => {
+  const convs = myChannels(req.user).map((c) => {
+    const last = db.prepare(`${msgSelect} WHERE m.channel = ? ORDER BY m.id DESC LIMIT 1`).get(c.channel);
+    return { ...c, last: last || null, unread: unreadIn(req.user.id, c.channel) };
+  });
+  // fixed channels first, then people with the most recent conversation
+  const fixed = convs.slice(0, 2);
+  const dms = convs.slice(2).sort((a, b) => (b.last ? b.last.id : 0) - (a.last ? a.last.id : 0) || a.title.localeCompare(b.title));
+  const all = [...fixed, ...dms];
+  res.json({ total_unread: all.reduce((n, c) => n + c.unread, 0), conversations: all });
+});
+
+// Small and fast: just the badge numbers, polled while the app is open.
+app.get('/api/chat/unread', requireAuth, (req, res) => {
+  const chans = myChannels(req.user);
+  let total = 0;
+  for (const c of chans) total += unreadIn(req.user.id, c.channel);
+  const announce = unreadIn(req.user.id, 'announce');
+  let latest = null;
+  if (announce) latest = db.prepare(`${msgSelect} WHERE m.channel = 'announce' ORDER BY m.id DESC LIMIT 1`).get();
+  res.json({ total, announce, latest_announcement: latest || null });
+});
+
+function seenStats(msgs) {
+  // For announcements: how many active colleagues (not the sender) have read each one.
+  const people = db.prepare('SELECT id FROM users WHERE active = 1').all().map((u) => u.id);
+  const reads = new Map(db.prepare("SELECT user_id, last_read_id FROM chat_reads WHERE channel = 'announce'").all().map((r) => [r.user_id, r.last_read_id]));
+  for (const m of msgs) {
+    const audience = people.filter((id) => id !== m.sender_id);
+    m.seen_count = audience.filter((id) => (reads.get(id) || 0) >= m.id).length;
+    m.audience = audience.length;
+  }
+}
+
+app.get('/api/chat/c/:channel', requireAuth, (req, res) => {
+  const c = parseChannel(req.params.channel, req.user);
+  if (!c) return fail(res, 404, 'Conversation not found');
+  const after = Number(req.query.after) || 0;
+  let msgs;
+  if (after) {
+    msgs = db.prepare(`${msgSelect} WHERE m.channel = ? AND m.id > ? ORDER BY m.id LIMIT 200`).all(c.ch, after);
+  } else {
+    msgs = db.prepare(`${msgSelect} WHERE m.channel = ? ORDER BY m.id DESC LIMIT 150`).all(c.ch).reverse();
+  }
+  if (c.kind === 'announce' && req.user.role === 'admin') seenStats(msgs);
+  const top = db.prepare('SELECT MAX(id) AS id FROM messages WHERE channel = ?').get(c.ch).id;
+  if (top) markRead(req.user.id, c.ch, top); // opening a conversation = reading it
+  let other = null;
+  if (c.kind === 'dm') {
+    other = db.prepare('SELECT id, name, title, phone, active FROM users WHERE id = ?').get(c.otherId);
+    if (other && req.user.role !== 'admin') delete other.phone; // contact details are for admins only
+  }
+  if (c.kind === 'dm' && !other) return fail(res, 404, 'Conversation not found');
+  res.json({ channel: c.ch, kind: c.kind, other, can_post: c.kind !== 'announce' || req.user.role === 'admin', messages: msgs });
+});
+
+app.post('/api/chat/c/:channel', requireAuth, (req, res) => {
+  const c = parseChannel(req.params.channel, req.user);
+  if (!c) return fail(res, 404, 'Conversation not found');
+  if (c.kind === 'announce' && req.user.role !== 'admin') return fail(res, 403, 'Only admins can post announcements');
+  if (c.kind === 'dm') {
+    const other = db.prepare('SELECT active FROM users WHERE id = ?').get(c.otherId);
+    if (!other) return fail(res, 404, 'Conversation not found');
+    if (!other.active) return fail(res, 400, 'This employee is switched off and can no longer receive messages');
+  }
+  const body = clean(req.body.body, 2000);
+  let clientId = req.body.client_id ? Number(req.body.client_id) : null;
+  if (clientId && !getClient(clientId)) clientId = null;
+  if (!body && !clientId) return fail(res, 400, 'Message is empty');
+  const r = db.prepare('INSERT INTO messages (channel, sender_id, body, client_id, created_at) VALUES (?,?,?,?,?)')
+    .run(c.ch, req.user.id, body || '', clientId, now());
+  markRead(req.user.id, c.ch, r.lastInsertRowid);
+  const msg = db.prepare(`${msgSelect} WHERE m.id = ?`).get(r.lastInsertRowid);
+  if (c.kind === 'announce') seenStats([msg]); // so "Seen by 0 of N" shows straight away
+  res.json(msg);
+});
+
+// Who has / hasn't seen an announcement (admins).
+app.get('/api/chat/announce/:id/seen', requireAuth, requireAdmin, (req, res) => {
+  const m = db.prepare("SELECT id, sender_id FROM messages WHERE id = ? AND channel = 'announce'").get(Number(req.params.id));
+  if (!m) return fail(res, 404, 'Not found');
+  const rows = db.prepare(`SELECT u.id, u.name, COALESCE(r.last_read_id, 0) >= ? AS seen
+    FROM users u LEFT JOIN chat_reads r ON r.user_id = u.id AND r.channel = 'announce'
+    WHERE u.active = 1 AND u.id != COALESCE(?, -1) ORDER BY u.name`).all(m.id, m.sender_id);
+  res.json({ seen: rows.filter((r) => r.seen).map((r) => r.name), not_seen: rows.filter((r) => !r.seen).map((r) => r.name) });
 });
 
 // ---------- clients (buyers & sellers) ----------

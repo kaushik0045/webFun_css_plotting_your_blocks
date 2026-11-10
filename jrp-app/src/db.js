@@ -104,6 +104,26 @@ CREATE TABLE IF NOT EXISTS reminders (
 CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id, done_at, due_at);
 CREATE INDEX IF NOT EXISTS idx_reminders_client ON reminders(client_id);
 
+-- Office chat. channel = 'announce' (admins post, everyone reads), 'team' (everyone),
+-- or 'dm:<lowId>-<highId>' (private between two employees).
+CREATE TABLE IF NOT EXISTS messages (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  channel    TEXT NOT NULL,
+  sender_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  body       TEXT NOT NULL,
+  client_id  INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel, id);
+
+-- How far each person has read in each conversation (for unread badges and "Seen by").
+CREATE TABLE IF NOT EXISTS chat_reads (
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  channel      TEXT NOT NULL,
+  last_read_id INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_id, channel)
+);
+
 CREATE TABLE IF NOT EXISTS sessions (
   sid     TEXT PRIMARY KEY,
   data    TEXT NOT NULL,
@@ -130,6 +150,11 @@ for (const t of ['comments', 'files', 'activity']) {
 // Answers to the buyer / seller questions (see src/questions.js), stored as JSON.
 addColumn('clients', 'details', "TEXT NOT NULL DEFAULT '{}'");
 addColumn('properties', 'details', "TEXT NOT NULL DEFAULT '{}'");
+// Employee directory details.
+addColumn('users', 'phone', 'TEXT');
+addColumn('users', 'title', 'TEXT');
+addColumn('users', 'last_login_at', 'TEXT');
+
 // Secret per-reminder key, so the calendar file opens even where the login cookie isn't shared (iPhone home-screen apps).
 addColumn('reminders', 'cal_key', 'TEXT');
 

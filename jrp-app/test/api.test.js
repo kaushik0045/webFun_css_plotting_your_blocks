@@ -400,3 +400,97 @@ test('reminders: set, list, calendar file, secret link, done', async () => {
   assert.ok(!(await a('GET', '/api/reminders')).data.some((x) => x.id === r.data.id));
   assert.ok((await a('GET', `/api/clients/${id}`)).data.activity.some((x) => x.action === 'reminder_done'));
 });
+
+test('team directory: admins only, phone/title saved, password reset works and logs them out', async () => {
+  await admin('POST', '/api/admin/users', { name: 'Dir Agent', email: 'dir@test.com', password: 'DirPass123', title: 'Sales Agent', phone: '209-555-4444' });
+  const list = (await admin('GET', '/api/admin/users')).data;
+  const u = list.find((x) => x.email === 'dir@test.com');
+  assert.equal(u.title, 'Sales Agent');
+  assert.equal(u.phone, '209-555-4444');
+  assert.ok('last_login_at' in u && 'client_count' in u);
+  assert.equal(u.password_hash, undefined, 'password hashes never leave the server');
+
+  const agentA = agent();
+  await agentA('POST', '/api/login', { email: 'dir@test.com', password: 'DirPass123' });
+  assert.equal((await agentA('GET', '/api/admin/users')).status, 403, 'staff cannot see the directory');
+  assert.equal((await agentA('POST', `/api/admin/users/${u.id}/reset-password`)).status, 403);
+  assert.ok((await admin('GET', '/api/admin/users')).data.find((x) => x.id === u.id).last_login_at, 'last login recorded');
+
+  const r = await admin('POST', `/api/admin/users/${u.id}/reset-password`);
+  assert.equal(r.status, 200);
+  assert.match(r.data.password, /^[A-Za-z0-9]{5}-[A-Za-z0-9]{5}$/);
+  assert.equal((await agentA('GET', '/api/clients')).status, 401, 'logged out everywhere after reset');
+  const oldPw = agent();
+  assert.equal((await oldPw('POST', '/api/login', { email: 'dir@test.com', password: 'DirPass123' })).status, 401);
+  const newPw = agent();
+  assert.equal((await newPw('POST', '/api/login', { email: 'dir@test.com', password: r.data.password })).status, 200);
+  assert.equal((await admin('GET', '/api/me')).status, 200, "the admin's own session is untouched");
+});
+
+test('chat: announcements, team chat, private messages, unread, seen-by, sharing a client', async () => {
+  for (const [n, e] of [['Chat A', 'ca@test.com'], ['Chat B', 'cb@test.com'], ['Chat C', 'cc@test.com']]) {
+    await admin('POST', '/api/admin/users', { name: n, email: e, password: 'ChatPass123', phone: '209-555-9999' });
+  }
+  const users = (await admin('GET', '/api/admin/users')).data;
+  const id = (e) => users.find((u) => u.email === e).id;
+  const [A, B, C] = [agent(), agent(), agent()];
+  await A('POST', '/api/login', { email: 'ca@test.com', password: 'ChatPass123' });
+  await B('POST', '/api/login', { email: 'cb@test.com', password: 'ChatPass123' });
+  await C('POST', '/api/login', { email: 'cc@test.com', password: 'ChatPass123' });
+  const me = (await admin('GET', '/api/me')).data;
+  const dm = (x, y) => `dm:${Math.min(x, y)}-${Math.max(x, y)}`;
+  const enc = encodeURIComponent;
+
+  // announcements: only admins post
+  assert.equal((await A('POST', '/api/chat/c/announce', { body: 'I am not the boss' })).status, 403);
+  const ann = await admin('POST', '/api/chat/c/announce', { body: 'Office closed Monday' });
+  assert.equal(ann.status, 200);
+  let unread = (await A('GET', '/api/chat/unread')).data;
+  assert.ok(unread.announce >= 1 && unread.latest_announcement.body === 'Office closed Monday');
+  await A('GET', '/api/chat/c/announce'); // A reads it
+  assert.equal((await A('GET', '/api/chat/unread')).data.announce, 0);
+  const view = (await admin('GET', '/api/chat/c/announce')).data;
+  const last = view.messages.at(-1);
+  assert.ok(last.seen_count >= 1 && last.audience >= 3, 'admin sees "seen by"');
+  const who = (await admin('GET', `/api/chat/announce/${last.id}/seen`)).data;
+  assert.ok(who.seen.includes('Chat A') && who.not_seen.includes('Chat B'));
+  assert.equal((await A('GET', `/api/chat/announce/${last.id}/seen`)).status, 403);
+
+  // team chat: everyone
+  assert.equal((await B('POST', '/api/chat/c/team', { body: 'Morning all' })).status, 200);
+  assert.ok((await C('GET', '/api/chat/c/team')).data.messages.some((m) => m.body === 'Morning all'));
+
+  // private messages: only the two people
+  const ab = dm(id('ca@test.com'), id('cb@test.com'));
+  assert.equal((await A('POST', `/api/chat/c/${enc(ab)}`, { body: 'Secret between A and B' })).status, 200);
+  assert.equal((await B('GET', '/api/chat/unread')).data.total >= 1, true);
+  assert.ok((await B('GET', `/api/chat/c/${enc(ab)}`)).data.messages.some((m) => m.body === 'Secret between A and B'));
+  assert.equal((await C('GET', `/api/chat/c/${enc(ab)}`)).status, 404, 'a third person cannot read it');
+  assert.equal((await C('POST', `/api/chat/c/${enc(ab)}`, { body: 'sneaky' })).status, 404);
+  assert.equal((await admin('GET', `/api/chat/c/${enc(ab)}`)).status, 404, 'not even admins read private messages');
+  assert.equal((await A('GET', `/api/chat/c/${enc('dm:5-5')}`)).status, 404);
+  assert.equal((await A('GET', `/api/chat/c/${enc('../../etc')}`)).status, 404);
+
+  // contact details only for admins
+  const bossDm = dm(me.id, id('ca@test.com'));
+  assert.equal((await A('GET', `/api/chat/c/${enc(bossDm)}`)).data.other.phone, undefined, 'agents do not get phone numbers');
+  assert.equal((await admin('GET', `/api/chat/c/${enc(bossDm)}`)).data.other.phone, '209-555-9999');
+
+  // share a client as a card
+  const client = (await admin('POST', '/api/clients', { type: 'buyer', name: 'Shared Buyer' })).data.id;
+  const sh = await admin('POST', `/api/chat/c/${enc(bossDm)}`, { body: 'Call this buyer?', client_id: client });
+  assert.equal(sh.data.client_name, 'Shared Buyer');
+  const list = (await A('GET', '/api/chat')).data;
+  const conv = list.conversations.find((c) => c.channel === bossDm);
+  assert.equal(conv.unread, 1);
+  assert.equal(conv.last.client_name, 'Shared Buyer');
+  assert.equal(list.conversations[0].channel, 'announce');
+
+  // empty / huge / switched-off
+  assert.equal((await A('POST', '/api/chat/c/team', { body: '   ' })).status, 400);
+  const big = await A('POST', '/api/chat/c/team', { body: 'x'.repeat(5000) });
+  assert.equal(big.data.body.length, 2000);
+  await admin('PATCH', `/api/admin/users/${id('cc@test.com')}`, { active: false });
+  const ac = dm(id('ca@test.com'), id('cc@test.com'));
+  assert.equal((await A('POST', `/api/chat/c/${enc(ac)}`, { body: 'hello?' })).status, 400, 'cannot message a switched-off employee');
+});
