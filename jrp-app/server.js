@@ -46,8 +46,12 @@ app.use(helmet({
       styleSrc: ["'self'"],
       styleSrcAttr: ["'unsafe-inline'"],
       scriptSrc: ["'self'"],
+      // Only force https when live. On a Mac over Wi-Fi (http://192.168.x.x:3000) it would
+      // make phones ask for https files that don't exist, leaving a blank page.
+      upgradeInsecureRequests: IS_PROD ? [] : null,
     },
   },
+  strictTransportSecurity: IS_PROD,
 }));
 app.use(compression());
 app.use(express.json({ limit: '200kb' }));
