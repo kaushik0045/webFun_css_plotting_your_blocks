@@ -568,7 +568,7 @@ function fmtAnswer(q, v) {
 
 // Read-only list of answers.
 function answersHtml(list, values, emptyMsg) {
-  const asked = list.filter((q) => !q.showIf || values[q.showIf.key] === q.showIf.equals);
+  const asked = list.filter((q) => isShown(q, values));
   const answered = asked.filter((q) => !isEmpty(values[q.key]));
   if (!answered.length) return `<p class="muted">${esc(emptyMsg)}</p>`;
   const missing = asked.length - answered.length;
@@ -576,6 +576,18 @@ function answersHtml(list, values, emptyMsg) {
       <li><span class="k">${esc(q.label)}</span><span class="v" style="white-space:pre-wrap">${esc(fmtAnswer(q, values[q.key]))}</span></li>`).join('')}
     </ul>${missing ? `<p class="muted small" style="margin:8px 0 0">Not answered yet: ${asked.filter((q) => isEmpty(values[q.key])).map((q) => `<b>${esc(q.label)}</b>`).join(', ')}</p>` : ''}`;
 }
+
+// Same rules as src/match.js: is a question asked, and which options fit?
+function isShown(q, values) {
+  if (!q.showIf) return true;
+  const v = values[q.showIf.key];
+  return q.showIf.in ? q.showIf.in.includes(v) : v === q.showIf.equals;
+}
+function allowedOptions(q, values) {
+  if (!q.optionsBy) return q.options;
+  return q.optionsBy.groups[values[q.optionsBy.key]] || q.options;
+}
+const optionTags = (opts, v) => `<option value="">Not answered</option>${opts.map((o) => `<option value="${esc(o)}" ${v === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}`;
 
 // Form inputs built from the question list in src/questions.js.
 function questionFields(list, values, prefix) {
@@ -590,18 +602,22 @@ function questionFields(list, values, prefix) {
     } else if (q.type === 'number') {
       input = `<input id="${id}" inputmode="decimal" autocomplete="off" value="${isEmpty(v) ? '' : esc(v)}">`;
     } else if (q.type === 'select' || q.type === 'yesno') {
-      const opts = q.type === 'yesno' ? [['yes', 'Yes'], ['no', 'No']] : q.options.map((o) => [o, o]);
-      input = `<select id="${id}"><option value="">Not answered</option>${opts.map(([val, l]) => `<option value="${esc(val)}" ${v === val ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+      const by = q.optionsBy ? ` data-opts-by="${prefix}-${esc(q.optionsBy.key)}" data-q="${esc(q.key)}"` : '';
+      input = q.type === 'yesno'
+        ? `<select id="${id}"><option value="">Not answered</option>${[['yes', 'Yes'], ['no', 'No']].map(([val, l]) => `<option value="${val}" ${v === val ? 'selected' : ''}>${l}</option>`).join('')}</select>`
+        : `<select id="${id}"${by}>${optionTags(allowedOptions(q, values), v)}</select>`;
     } else if (q.type === 'multiselect') {
-      input = `<div class="checks" id="${id}" role="group" aria-label="${esc(q.label)}">${q.options.map((o) => `
-        <label class="check"><input type="checkbox" value="${esc(o)}" ${Array.isArray(v) && v.includes(o) ? 'checked' : ''}><span>${esc(o)}</span></label>`).join('')}</div>`;
+      const ok = allowedOptions(q, values);
+      const by = q.optionsBy ? ` data-opts-by="${prefix}-${esc(q.optionsBy.key)}" data-q="${esc(q.key)}"` : '';
+      input = `<div class="checks" id="${id}" role="group" aria-label="${esc(q.label)}"${by}>${q.options.map((o) => `
+        <label class="check" ${ok.includes(o) ? '' : 'hidden'}><input type="checkbox" value="${esc(o)}" ${Array.isArray(v) && v.includes(o) ? 'checked' : ''}><span>${esc(o)}</span></label>`).join('')}</div>`;
     } else if (q.type === 'textarea') {
       input = `<textarea id="${id}" maxlength="2000">${esc(v)}</textarea>`;
     } else {
       input = `<input id="${id}" maxlength="200" value="${esc(v)}">`;
     }
     const cond = q.showIf
-      ? ` data-showif="${prefix}-${esc(q.showIf.key)}" data-equals="${esc(q.showIf.equals)}" ${values[q.showIf.key] === q.showIf.equals ? '' : 'hidden'}`
+      ? ` data-showif="${prefix}-${esc(q.showIf.key)}" data-in="${esc((q.showIf.in || [q.showIf.equals]).join('|'))}" ${isShown(q, values) ? '' : 'hidden'}`
       : '';
     return `<div class="field"${cond}>${q.type === 'multiselect' ? `<span class="label">${esc(q.label)}</span>` : `<label for="${id}">${esc(q.label)}</label>`}${input}${help}</div>`;
   }).join('');
@@ -612,7 +628,9 @@ function readQuestionFields(list, prefix) {
   for (const q of list) {
     const el = document.getElementById(`${prefix}-${q.key}`);
     if (!el) continue;
-    out[q.key] = q.type === 'multiselect' ? $$('input:checked', el).map((i) => i.value) : el.value;
+    const field = el.closest('.field');
+    if (field && field.hidden) { out[q.key] = q.type === 'multiselect' ? [] : ''; continue; } // not asked = cleared
+    out[q.key] = q.type === 'multiselect' ? $$('label:not([hidden]) input:checked', el).map((i) => i.value) : el.value;
   }
   return out;
 }
@@ -708,7 +726,23 @@ function bindMatchesCard(list, mode) {
 // Show or hide follow-up questions (e.g. "If yes, how much?") as answers change.
 document.addEventListener('change', (e) => {
   if (!e.target.id) return;
-  $$(`[data-showif="${CSS.escape(e.target.id)}"]`).forEach((f) => { f.hidden = e.target.value !== f.dataset.equals; });
+  $$(`[data-showif="${CSS.escape(e.target.id)}"]`).forEach((f) => { f.hidden = !f.dataset.in.split('|').includes(e.target.value); });
+  // Residential / Commercial changed: show only the property types that fit.
+  $$(`[data-opts-by="${CSS.escape(e.target.id)}"]`).forEach((el) => {
+    const q = (questionsCache.seller.concat(questionsCache.buyer)).find((x) => x.key === el.dataset.q && x.optionsBy);
+    if (!q) return;
+    const ok = allowedOptions(q, { [q.optionsBy.key]: e.target.value });
+    if (el.tagName === 'SELECT') {
+      const keep = ok.includes(el.value) ? el.value : '';
+      el.innerHTML = optionTags(ok, keep); // rebuilt, because iPhones ignore hidden <option>s
+    } else {
+      $$('label.check', el).forEach((l) => {
+        const show = ok.includes(l.querySelector('input').value);
+        l.hidden = !show;
+        if (!show) l.querySelector('input').checked = false;
+      });
+    }
+  });
 });
 
 // Funds fills itself in as 5 x the down payment, unless the agent typed their own number.

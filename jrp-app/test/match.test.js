@@ -92,7 +92,7 @@ test('JRP buyer questions: experience follow-ups only kept when experience is Ye
   const no = cleanDetails(BUYER_QUESTIONS, { business_experience: 'no', experience_where: 'Fresno', experience_years: '5' });
   assert.deepEqual(no, { business_experience: 'no' });
   const yes = cleanDetails(BUYER_QUESTIONS, { business_experience: 'yes', experience_where: 'Fresno', experience_years: '5', branding: 'Branded' });
-  assert.deepEqual(yes, { business_experience: 'yes', experience_where: 'Fresno', experience_years: 5, branding: 'Branded' });
+  assert.deepEqual(yes, { business_experience: 'yes', experience_where: 'Fresno', experience_years: 5, branding: 'Branded', category: 'Commercial' });
   assert.ok(!BUYER_QUESTIONS.some((q) => q.key === 'exchange_1031'), '1031 is a seller question only');
   assert.ok(SELLER_QUESTIONS.some((q) => q.key === 'exchange_1031'), '1031 is asked of sellers');
   for (const key of ['brands', 'states', 'branding', 'cash_injection', 'budget_max', 'business_experience', 'experience_where', 'experience_years']) {
@@ -109,7 +109,7 @@ test('missing price on either side = not enough info, with what to fill in', () 
 
 test('form answers are cleaned: money text, unknown options and unknown questions', () => {
   const d = cleanDetails(BUYER_QUESTIONS, { budget_max: '$1,200,000', property_types: ['Gas station', 'Spaceship'], financing: 'Bitcoin', hacker: 'x' });
-  assert.deepEqual(d, { budget_max: 1200000, property_types: ['Gas station'] });
+  assert.deepEqual(d, { budget_max: 1200000, property_types: ['Gas station'], category: 'Commercial' });
   const s = cleanDetails(SELLER_QUESTIONS, { asking_price: '', listing_status: 'For sale' }, { asking_price: 5 });
   assert.deepEqual(s, { listing_status: 'For sale' }, 'blank answer clears the old one');
 });
@@ -221,7 +221,7 @@ test("JRP seller questions: follow-up 'how much' only kept when rental income is
   const yes = cleanDetails(SELLER_QUESTIONS, { rental_income: 'yes', rental_income_amount: '$5,000' });
   assert.equal(yes.rental_income_amount, 5000);
   const lic = cleanDetails(SELLER_QUESTIONS, { abc_license: 'Applied for', cigarette_license: 'Maybe', brand: 'Chevron', gas_volume: '85,000' });
-  assert.deepEqual(lic, { abc_license: 'Applied for', brand: 'Chevron', gas_volume: 85000 });
+  assert.deepEqual(lic, { abc_license: 'Applied for', brand: 'Chevron', gas_volume: 85000, category: 'Commercial' });
   for (const key of ['asking_price', 'brand', 'gas_volume', 'gas_margin', 'cstore_sales', 'fuel_contract', 'mpds', 'size_sqft', 'lot_acres',
     'tank_size', 'double_walled', 'rental_income', 'rental_income_amount', 'gross_profit', 'nearest_freeway', 'abc_license',
     'cigarette_license', 'ebt', 'lottery', 'building_rent', 'hours', 'additional_info']) {
@@ -275,4 +275,35 @@ test('no Funds entered: buying power = 5 x down payment', () => {
   // An entered Funds number always wins over the estimate.
   const own = compare(buyer({ property_types: ['Gas station'], cash_injection: 350000, budget_max: 1000000 }), gasStation(1750000));
   assert.equal(own.parts.find((p) => p.key === 'price').calc.budget, 1000000);
+});
+
+test('Residential / Commercial: decides which types and questions apply', () => {
+  // Residential seller: gas station answers and commercial types are dropped.
+  const res = cleanDetails(SELLER_QUESTIONS, { category: 'Residential', property_type: 'Gas station', gas_volume: '5000', bedrooms: '3' });
+  assert.deepEqual(res, { category: 'Residential', bedrooms: 3 });
+  const res2 = cleanDetails(SELLER_QUESTIONS, { category: 'Residential', property_type: 'Condo / Townhouse' });
+  assert.equal(res2.property_type, 'Condo / Townhouse');
+  // Commercial seller: no bedrooms, gas answers kept.
+  const com = cleanDetails(SELLER_QUESTIONS, { category: 'Commercial', property_type: 'Gas station', gas_volume: '5000', bedrooms: '3' });
+  assert.deepEqual(com, { category: 'Commercial', property_type: 'Gas station', gas_volume: 5000 });
+  // Buyer: "Both" keeps any type; Residential drops brand questions and commercial types.
+  const both = cleanDetails(BUYER_QUESTIONS, { category: 'Both', property_types: ['Gas station', 'Single-family home'], brands: ['ARCO'] });
+  assert.deepEqual(both.property_types, ['Gas station', 'Single-family home']);
+  assert.deepEqual(both.brands, ['ARCO']);
+  const rb = cleanDetails(BUYER_QUESTIONS, { category: 'Residential', property_types: ['Gas station', 'Single-family home'], brands: ['ARCO'], branding: 'Branded' });
+  assert.deepEqual(rb, { category: 'Residential', property_types: ['Single-family home'] });
+  // Old records with no answer get one from their property types.
+  assert.equal(cleanDetails(BUYER_QUESTIONS, { property_types: ['Gas station', 'Condo / Townhouse'] }).category, 'Both');
+  assert.equal(cleanDetails(SELLER_QUESTIONS, { property_type: 'Single-family home' }).category, 'Residential');
+});
+
+test('Residential / Commercial mismatch is not a good match', () => {
+  const resBuyer = buyer({ category: 'Residential', budget_max: 600000 });
+  const station = listing({ category: 'Commercial', asking_price: 500000, property_type: 'Gas station' });
+  const m = compare(resBuyer, station);
+  assert.equal(m.level, 'poor');
+  assert.match(m.parts.find((p) => p.key === 'category').text, /commercial property, but the buyer wants residential/);
+  const home = listing({ category: 'Residential', asking_price: 500000, property_type: 'Single-family home' });
+  assert.equal(compare(resBuyer, home).level, 'great');
+  assert.equal(compare(buyer({ category: 'Both', budget_max: 600000 }), station).level, 'great');
 });

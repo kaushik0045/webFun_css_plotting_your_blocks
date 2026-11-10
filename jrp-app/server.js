@@ -13,6 +13,7 @@ const { db, UPLOAD_DIR, logActivity } = require('./src/db');
 const SqliteStore = require('./src/sessionStore');
 const match = require('./src/match');
 const push = require('./src/push');
+match.backfillCategories(db);
 const { LEVELS } = require('./src/questions');
 
 const PORT = process.env.PORT || 3000;

@@ -1,6 +1,19 @@
 // Matching engine: compares every buyer with every property for sale and
 // explains the result ("See why"). Rules and weights live in src/questions.js.
-const { SELLER_QUESTIONS, BUYER_QUESTIONS, MATCH_RULES, LEVELS, STATES, FUNDS_MULTIPLIER } = require('./questions');
+const { SELLER_QUESTIONS, BUYER_QUESTIONS, MATCH_RULES, LEVELS, STATES, FUNDS_MULTIPLIER, categoryOfType } = require('./questions');
+
+// Is this question asked, given the other answers? (showIf: { key, equals } or { key, in: [...] })
+function isShown(q, values) {
+  if (!q.showIf) return true;
+  const v = values[q.showIf.key];
+  return q.showIf.in ? q.showIf.in.includes(v) : v === q.showIf.equals;
+}
+// The options allowed for a question, given the other answers (optionsBy).
+function allowedOptions(q, values) {
+  if (!q.optionsBy) return q.options;
+  const group = q.optionsBy.groups[values[q.optionsBy.key]];
+  return group || q.options; // nothing picked yet, or "Both" = all
+}
 
 const blank = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 const money = (n) => '$' + Math.round(n).toLocaleString('en-US');
@@ -38,9 +51,20 @@ function cleanDetails(questions, input, existing = {}) {
     }
     if (val === null) delete out[q.key]; else out[q.key] = val;
   }
-  // Drop follow-up answers whose condition is no longer true (e.g. rental amount when rental income is "No").
+  inferCategory(questions, out);
+  // Drop follow-up answers whose condition is no longer true (e.g. rental amount when rental income is "No",
+  // or gas station details on a residential property).
   for (const q of questions) {
-    if (q.showIf && out[q.showIf.key] !== q.showIf.equals) delete out[q.key];
+    if (!isShown(q, out)) delete out[q.key];
+  }
+  // Drop property types that don't fit Residential / Commercial.
+  for (const q of questions) {
+    if (!q.optionsBy || out[q.key] === undefined) continue;
+    const ok = allowedOptions(q, out);
+    if (Array.isArray(out[q.key])) {
+      out[q.key] = out[q.key].filter((v) => ok.includes(v));
+      if (!out[q.key].length) delete out[q.key];
+    } else if (!ok.includes(out[q.key])) delete out[q.key];
   }
   return out;
 }
@@ -128,6 +152,14 @@ function scoreRule(rule, listing, buyer) {
     return { ...base, status: score >= 70 ? 'partial' : 'miss', score,
       calc: { asking, budget, difference: diff, direction: 'over', pctOfBudget: overPct, sellerDropPct: dropPct, ...cashInfo },
       why: () => `${money(diff)} more than the buyer's funds. The buyer would need ${pct(overPct)} more money, or the seller would need to lower the price by ${pct(dropPct)} to ${money(budget)}.` };
+  }
+
+  if (rule.kind === 'category') {
+    if (blank(b) || b === 'Both') return { ...base, status: 'any', score: null, why: () => `Buyer is open to residential or commercial${blank(s) ? '' : ` (this one: ${s.toLowerCase()})`}.` };
+    if (blank(s)) return { ...base, status: 'missing', score: null, why: () => 'Add whether this property is residential or commercial.' };
+    return s === b
+      ? { ...base, status: 'match', score: 100, why: () => `${s}, as the buyer wants.` }
+      : { ...base, status: 'miss', score: 0, why: () => `This is a ${s.toLowerCase()} property, but the buyer wants ${b.toLowerCase()}.` };
   }
 
   if (rule.kind === 'oneOf') {
@@ -263,7 +295,39 @@ function listingSummary(l) {
     brand: l.details.brand || null };
 }
 
-module.exports = {
+// Residential / Commercial not picked yet: work it out from the property type(s), or from
+// gas-station answers, so older records never lose their details.
+function inferCategory(questions, d) {
+  const catQ = questions.find((q) => q.key === 'category');
+  if (!catQ || d.category) return d;
+  const types = Array.isArray(d.property_types) ? d.property_types : d.property_type ? [d.property_type] : [];
+  const cats = [...new Set(types.map(categoryOfType).filter(Boolean))];
+  let cat = cats.length === 1 ? cats[0] : cats.length > 1 && catQ.options.includes('Both') ? 'Both' : null;
+  if (!cat) {
+    const commercialOnly = questions.some((q) => q.showIf && q.showIf.key === 'category' && q.showIf.in
+      && q.showIf.in.includes('Commercial') && !q.showIf.in.includes('Residential') && !blank(d[q.key]));
+    if (commercialOnly) cat = 'Commercial';
+  }
+  if (cat) d.category = cat;
+  return d;
+}
+
+// Fill in Residential / Commercial on records made before that question existed.
+function backfillCategories(db) {
+  let n = 0;
+  for (const [table, qs] of [['properties', SELLER_QUESTIONS], ['clients', BUYER_QUESTIONS]]) {
+    const upd = db.prepare(`UPDATE ${table} SET details = ? WHERE id = ?`);
+    for (const r of db.prepare(`SELECT id, details FROM ${table}`).all()) {
+      const d = parseDetails(r.details);
+      if (d.category) continue;
+      inferCategory(qs, d);
+      if (d.category) { upd.run(JSON.stringify(d), r.id); n += 1; }
+    }
+  }
+  return n;
+}
+
+module.exports = { isShown, allowedOptions, backfillCategories,
   statesOf, stateOfAddress,
   SELLER_QUESTIONS, BUYER_QUESTIONS, parseDetails, cleanDetails, changedLabels, compare,
   loadBuyers, loadListings, sortMatches, buyerSummary, listingSummary, isForSale,
