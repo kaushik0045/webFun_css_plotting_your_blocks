@@ -12,6 +12,7 @@ const multer = require('multer');
 const { db, UPLOAD_DIR, logActivity } = require('./src/db');
 const SqliteStore = require('./src/sessionStore');
 const match = require('./src/match');
+const push = require('./src/push');
 const { LEVELS } = require('./src/questions');
 
 const PORT = process.env.PORT || 3000;
@@ -323,6 +324,35 @@ app.post('/api/chat/c/:channel', requireAuth, (req, res) => {
   const msg = db.prepare(`${msgSelect} WHERE m.id = ?`).get(r.lastInsertRowid);
   if (c.kind === 'announce') seenStats([msg]); // so "Seen by 0 of N" shows straight away
   res.json(msg);
+  // Phone notifications: the other person for a private message, everyone else for team chat / announcements.
+  const to = c.kind === 'dm' ? [c.otherId]
+    : db.prepare('SELECT id FROM users WHERE active = 1 AND id != ?').all(req.user.id).map((u) => u.id);
+  const text = msg.body || (msg.client_name ? `Shared a client: ${msg.client_name}` : '');
+  const title = c.kind === 'announce' ? `📢 Announcement from ${req.user.name}`
+    : c.kind === 'team' ? `${req.user.name} in Team chat` : req.user.name;
+  push.notify(to, {
+    title,
+    body: (msg.body && msg.client_name ? `${text}\n(About ${msg.client_name})` : text).slice(0, 240),
+    url: `/#/chat/${encodeURIComponent(c.ch)}`,
+    tag: c.ch,
+    id: msg.id,
+  }).catch(() => {});
+});
+
+// ---------- notifications (Web Push) ----------
+app.get('/api/push/key', requireAuth, (req, res) => res.json({ publicKey: push.publicKey, devices: push.countFor(req.user.id) }));
+app.post('/api/push/subscribe', requireAuth, (req, res) => {
+  if (!push.validSubscription(req.body.subscription)) return fail(res, 400, 'This browser sent an invalid notification subscription');
+  push.save(req.user.id, req.body.subscription);
+  res.json({ ok: true, devices: push.countFor(req.user.id) });
+});
+app.post('/api/push/unsubscribe', requireAuth, (req, res) => {
+  push.remove(req.body.endpoint, req.user.id);
+  res.json({ ok: true });
+});
+app.post('/api/push/test', requireAuth, async (req, res) => {
+  const results = await push.notify([req.user.id], { title: 'JRP Client Book', body: 'Notifications are working ✅', url: '/#/chat', tag: 'test' });
+  res.json({ sent: results.filter(Boolean).length, devices: results.length });
 });
 
 // Who has / hasn't seen an announcement (admins).

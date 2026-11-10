@@ -64,6 +64,17 @@ jrp-app/
 
 ---
 
+## Message notifications (like WhatsApp)
+
+Chat messages arrive as phone/computer notifications even when the app is closed.
+
+- Each person taps **Turn on** on the home screen (or **Me → Turn on notifications**) once per device.
+- **iPhone/iPad:** needs iOS 16.4 or newer, and the app must be added to the home screen first (Safari → Share → Add to Home Screen), then opened from that icon.
+- **Android, Windows, Mac:** works in Chrome, Edge, Firefox and Safari.
+- Phones need the live **https://** address; on your own computer, `http://localhost:3000` works for testing.
+- The signing keys are created automatically in the data folder (`vapid.json`). Keep that file with the data: if it's lost, everyone just taps **Turn on** again.
+- Private messages go to the other person; team chat and announcements go to everyone except the sender.
+
 ## Team directory and office chat
 
 - **Team directory** (Team tab, admins only): every employee's job title, login email, phone, last login, assigned clients and overdue reminders, with Call / Text / Message buttons. **Passwords are stored one-way scrambled and can never be shown**; use **Reset password** to create a new temporary one (shown once, with a button to text it), which also logs that person out everywhere.

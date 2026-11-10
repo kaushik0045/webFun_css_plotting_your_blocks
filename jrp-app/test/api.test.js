@@ -494,3 +494,22 @@ test('chat: announcements, team chat, private messages, unread, seen-by, sharing
   const ac = dm(id('ca@test.com'), id('cc@test.com'));
   assert.equal((await A('POST', `/api/chat/c/${enc(ac)}`, { body: 'hello?' })).status, 400, 'cannot message a switched-off employee');
 });
+
+test('notifications: only real push services accepted; a device can be removed only by its owner', async () => {
+  const keys = { p256dh: 'B'.repeat(87), auth: 'A'.repeat(22) };
+  const key = (await admin('GET', '/api/push/key')).data;
+  assert.match(key.publicKey, /^[A-Za-z0-9_-]{80,}$/);
+  assert.equal((await admin('POST', '/api/push/subscribe', { subscription: { endpoint: 'https://evil.example.com/x', keys } })).status, 400);
+  assert.equal((await admin('POST', '/api/push/subscribe', { subscription: { endpoint: 'http://fcm.googleapis.com/x', keys } })).status, 400);
+  assert.equal((await admin('POST', '/api/push/subscribe', { subscription: 'junk' })).status, 400);
+  const ok = await admin('POST', '/api/push/subscribe', { subscription: { endpoint: 'https://fcm.googleapis.com/fcm/send/abc', keys } });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.data.devices, 1);
+  const other = agent();
+  await other('POST', '/api/login', { email: 'ca@test.com', password: 'ChatPass123' });
+  await other('POST', '/api/push/unsubscribe', { endpoint: 'https://fcm.googleapis.com/fcm/send/abc' });
+  assert.equal((await admin('GET', '/api/push/key')).data.devices, 1, "someone else can't remove my device");
+  await admin('POST', '/api/push/unsubscribe', { endpoint: 'https://fcm.googleapis.com/fcm/send/abc' });
+  assert.equal((await admin('GET', '/api/push/key')).data.devices, 0);
+  assert.equal((await other('POST', '/api/push/subscribe', { subscription: { endpoint: 'https://web.push.apple.com/x', keys } }, { csrf: false })).status, 403, 'needs the app header');
+});

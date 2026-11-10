@@ -522,3 +522,6 @@ input[type=date], input[type=time] { min-height: 46px; }
 @keyframes mp-fade { from { opacity: 0; } }
 @keyframes mp-pop { from { transform: translateY(14px) scale(.97); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .msg-pop, .msg-pop .mp-card { animation: none; } }
+.push-ask { border-left: 4px solid var(--red); }
+.push-ask p { margin: 4px 0 10px; }
+#push-card .row { display: flex; flex-wrap: wrap; gap: 10px; }

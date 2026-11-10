@@ -233,6 +233,7 @@ function viewLogin() {
       me = await api('POST', '/api/login', { email: $('#email').value, password: $('#password').value });
       go('#/');
       setTimeout(refreshUnread, 800);
+      pushSync();
     } catch (err) {
       $('#login-err').textContent = err.message;
     } finally { btn.disabled = false; }
@@ -258,6 +259,7 @@ async function viewSearch() {
       <span class="ab-body">${esc(ann.body)}</span>
       <span class="ab-open">Open →</span>
     </a>` : ''}
+    ${pushAskHtml()}
     ${myRem.length ? `
     <div class="card my-reminders">
       <h2>My reminders <span class="count">${myRem.length}</span></h2>
@@ -288,6 +290,7 @@ async function viewSearch() {
 
   $('#agent-filter').value = searchState.agent;
   let timer;
+  bindPushAsk();
   const input = $('#q');
   input.addEventListener('input', () => {
     searchState.q = input.value;
@@ -1491,6 +1494,7 @@ function viewAccount() {
       <p class="muted">${esc(me.email)} · ${me.role === 'admin' ? 'Admin' : 'Staff'}</p>
       <button class="btn ghost" id="logout">Log out</button>
     </div>
+    <div class="card" id="push-card">${pushCardHtml()}</div>
     ${standalone ? '' : `
     <div class="card install-tip">
       <h2>Put JRP on your phone's home screen</h2>
@@ -1506,7 +1510,12 @@ function viewAccount() {
         <button class="btn" type="submit">Update password</button>
       </form>
     </div>`;
-  $('#logout').addEventListener('click', async () => { await api('POST', '/api/logout').catch(() => {}); go('#/login'); });
+  $('#logout').addEventListener('click', async () => {
+    await pushForget();
+    await api('POST', '/api/logout').catch(() => {});
+    go('#/login');
+  });
+  bindPushCard();
   $('#pw-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
@@ -1516,6 +1525,133 @@ function viewAccount() {
   });
 }
 
+// ---------- notifications (Web Push) ----------
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && window.isSecureContext;
+const pushState = () => {
+  if (!pushSupported()) return isIOS && !isStandalone() ? 'ios-install' : 'unsupported';
+  return Notification.permission; // 'default' | 'granted' | 'denied'
+};
+function keyBytes(b64) {
+  const s = atob((b64 + '='.repeat((4 - (b64.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(s, (c) => c.charCodeAt(0));
+}
+async function pushSubscribe() {
+  const reg = await navigator.serviceWorker.ready;
+  const { publicKey } = await api('GET', '/api/push/key');
+  let sub = await reg.pushManager.getSubscription();
+  if (sub) {
+    // Re-subscribe if the server's key changed (e.g. a new server).
+    const cur = sub.options && sub.options.applicationServerKey ? btoa(String.fromCharCode(...new Uint8Array(sub.options.applicationServerKey))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') : publicKey;
+    if (cur !== publicKey) { await sub.unsubscribe(); sub = null; }
+  }
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) });
+  await api('POST', '/api/push/subscribe', { subscription: sub.toJSON() });
+}
+// Must run from a tap (iPhone rule).
+async function enablePush() {
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') throw new Error(perm === 'denied' ? 'Notifications are blocked. Turn them on in your phone/browser settings for this app.' : 'Notifications were not turned on.');
+  await pushSubscribe();
+}
+async function pushForget() {
+  try {
+    if (!pushSupported()) return;
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = reg && await reg.pushManager.getSubscription();
+    if (sub) await api('POST', '/api/push/unsubscribe', { endpoint: sub.endpoint });
+  } catch { /* offline: fine */ }
+}
+// After login / on start: link this device to whoever is logged in now.
+async function pushSync() {
+  try { if (me && pushState() === 'granted') await pushSubscribe(); } catch { /* try again next time */ }
+}
+
+function pushCardHtml() {
+  const st = pushState();
+  const head = '<h2>🔔 Message notifications</h2>';
+  if (st === 'granted') return `${head}<p>On for this device. New messages show up even when the app is closed.</p>
+    <div class="row"><button class="btn small ghost" id="push-test">Send me a test</button><button class="btn small ghost" id="push-off">Turn off on this device</button></div>`;
+  if (st === 'default') return `${head}<p>Get chat messages on this device even when the app is closed, like WhatsApp.</p>
+    <button class="btn" id="push-on">Turn on notifications</button>`;
+  if (st === 'denied') return `${head}<p><b>Blocked.</b> To turn them on: open your phone or browser <b>Settings → Notifications</b>, find <b>JRP</b> (or this website), and allow notifications. Then come back here.</p>`;
+  if (st === 'ios-install') return `${head}<p>On iPhone, notifications work once the app is on your home screen:</p>
+    <p>1. Tap <b>Share</b> → <b>Add to Home Screen</b>.<br>2. Open JRP from the home screen icon.<br>3. Come back to <b>Me</b> and tap <b>Turn on notifications</b>.</p>`;
+  return `${head}<p class="muted">This browser can't receive notifications. Use Chrome or Safari, or the app installed on your phone's home screen.</p>`;
+}
+function bindPushCard() {
+  const card = $('#push-card');
+  if (!card) return;
+  const rerender = () => { card.innerHTML = pushCardHtml(); bindPushCard(); };
+  const on = $('#push-on');
+  if (on) on.addEventListener('click', async () => {
+    on.disabled = true;
+    try { await enablePush(); toast('Notifications on'); dismissPushAsk(); } catch (err) { toast(err.message, true); }
+    rerender();
+  });
+  const test = $('#push-test');
+  if (test) test.addEventListener('click', async () => {
+    try {
+      await pushSubscribe();
+      const r = await api('POST', '/api/push/test');
+      toast(r.sent ? 'Test sent. Check your notifications.' : 'Could not reach this device. Try turning notifications off and on.', !r.sent);
+    } catch (err) { toast(err.message, true); }
+  });
+  const off = $('#push-off');
+  if (off) off.addEventListener('click', async () => {
+    try {
+      await pushForget();
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = reg && await reg.pushManager.getSubscription();
+      if (sub) await sub.unsubscribe();
+      toast('Notifications off on this device');
+    } catch (err) { toast(err.message, true); }
+    card.innerHTML = `<h2>🔔 Message notifications</h2><p>Off on this device.</p><button class="btn" id="push-on">Turn on notifications</button>`;
+    const again = $('#push-on');
+    again.addEventListener('click', async () => {
+      try { await enablePush(); toast('Notifications on'); } catch (err) { toast(err.message, true); }
+      rerender();
+    });
+  });
+}
+
+// Home-screen reminder to turn notifications on (until they say yes or "Not now").
+const pushAskKey = () => `jrp-push-ask-${me ? me.id : 0}`;
+function pushAskDismissed() { try { return localStorage.getItem(pushAskKey()) === '1'; } catch { return false; } }
+function dismissPushAsk() { try { localStorage.setItem(pushAskKey(), '1'); } catch { /* ignore */ } }
+function pushAskHtml() {
+  const st = pushState();
+  if (pushAskDismissed() || (st !== 'default' && st !== 'ios-install')) return '';
+  return `<div class="card push-ask" id="push-ask">
+      <p class="kicker">🔔 Don't miss messages</p>
+      <p>${st === 'ios-install'
+        ? 'Add JRP to your home screen (Share → Add to Home Screen), open it from there, then turn on notifications in <b>Me</b>.'
+        : 'Turn on notifications to get chat messages even when the app is closed.'}</p>
+      <div class="row">${st === 'default' ? '<button class="btn small" id="push-ask-on">Turn on</button>' : ''}
+        <button class="btn small ghost" id="push-ask-later">Not now</button></div>
+    </div>`;
+}
+function bindPushAsk() {
+  const box = $('#push-ask');
+  if (!box) return;
+  const on = $('#push-ask-on');
+  if (on) on.addEventListener('click', async () => {
+    on.disabled = true;
+    try { await enablePush(); toast('Notifications on'); dismissPushAsk(); box.remove(); } catch (err) { toast(err.message, true); on.disabled = false; }
+  });
+  $('#push-ask-later').addEventListener('click', () => { dismissPushAsk(); box.remove(); });
+}
+
+// The service worker tells open copies of the app about a new message right away.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (!e.data) return;
+    if (e.data.type === 'jrp-new-message') refreshUnread();
+    if (e.data.type === 'jrp-open' && e.data.url) location.href = e.data.url;
+  });
+}
+
 // ---------- start ----------
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-route();
+route().then(pushSync);
