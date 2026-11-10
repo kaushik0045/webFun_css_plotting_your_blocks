@@ -255,7 +255,7 @@ const sortMatches = (a, b) => (ORDER[a.level] - ORDER[b.level]) || ((b.score ?? 
 function buyerSummary(b) {
   return { id: b.id, name: b.name, agent_name: b.agent_name, assigned_agent_id: b.assigned_agent_id,
     budget: b.details.budget_max ?? (blank(b.details.cash_injection) ? null : Number(b.details.cash_injection) * FUNDS_MULTIPLIER), cash: b.details.cash_injection ?? null, types: b.details.property_types || [],
-    brands: b.details.brands || [], states: b.details.states || null, exchange_1031: b.details.exchange_1031 === 'yes' };
+    brands: b.details.brands || [], states: b.details.states || null };
 }
 function listingSummary(l) {
   return { id: l.id, address: l.address, client_id: l.client_id, client_name: l.client_name, agent_name: l.agent_name,

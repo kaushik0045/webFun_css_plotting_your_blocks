@@ -91,9 +91,11 @@ test('cash injection appears in the price calculator', () => {
 test('JRP buyer questions: experience follow-ups only kept when experience is Yes', () => {
   const no = cleanDetails(BUYER_QUESTIONS, { business_experience: 'no', experience_where: 'Fresno', experience_years: '5' });
   assert.deepEqual(no, { business_experience: 'no' });
-  const yes = cleanDetails(BUYER_QUESTIONS, { business_experience: 'yes', experience_where: 'Fresno', experience_years: '5', exchange_1031: 'yes', branding: 'Branded' });
-  assert.deepEqual(yes, { business_experience: 'yes', experience_where: 'Fresno', experience_years: 5, exchange_1031: 'yes', branding: 'Branded' });
-  for (const key of ['brands', 'states', 'branding', 'cash_injection', 'budget_max', 'exchange_1031', 'business_experience', 'experience_where', 'experience_years']) {
+  const yes = cleanDetails(BUYER_QUESTIONS, { business_experience: 'yes', experience_where: 'Fresno', experience_years: '5', branding: 'Branded' });
+  assert.deepEqual(yes, { business_experience: 'yes', experience_where: 'Fresno', experience_years: 5, branding: 'Branded' });
+  assert.ok(!BUYER_QUESTIONS.some((q) => q.key === 'exchange_1031'), '1031 is a seller question only');
+  assert.ok(SELLER_QUESTIONS.some((q) => q.key === 'exchange_1031'), '1031 is asked of sellers');
+  for (const key of ['brands', 'states', 'branding', 'cash_injection', 'budget_max', 'business_experience', 'experience_where', 'experience_years']) {
     assert.ok(BUYER_QUESTIONS.some((q) => q.key === key), `missing buyer question ${key}`);
   }
 });

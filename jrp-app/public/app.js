@@ -599,7 +599,7 @@ function matchItem(m, mode) {
   const buyerHtml = B ? `
       <a href="#/client/${B.id}" class="mi-title">${esc(B.name)}</a>
       <div class="meta small">${[B.budget !== null ? `Funds ${fmtMoney(B.budget)}` : null, B.cash !== null ? `Cash ${fmtMoney(B.cash)}` : null,
-        B.brands.length ? B.brands.join('/') : null, B.states, B.exchange_1031 ? '1031' : null].filter(Boolean).map(esc).join(' · ') || 'No buyer answers yet'}</div>
+        B.brands.length ? B.brands.join('/') : null, B.states].filter(Boolean).map(esc).join(' · ') || 'No buyer answers yet'}</div>
       <div class="meta small">Buyer's agent: ${esc(B.agent_name || 'Unassigned')}</div>` : '';
   const head = mode === 'listing' ? listingHtml : mode === 'buyer' ? buyerHtml
     : `<div class="pair"><div><span class="pair-k">Buyer</span>${buyerHtml}</div><div><span class="pair-k">Property</span>${listingHtml}</div></div>`;
@@ -758,12 +758,12 @@ async function viewClient(id) {
       <div id="share-slot"></div>
     </div>
 
-    ${c.type === 'buyer' && c.details.exchange_1031 === 'yes' && !dismissed1031(c.id) ? `
+    ${c.type === 'seller' && (c.properties || []).some((p) => p.details && p.details.exchange_1031 === 'yes') && !dismissed1031(c.id) ? `
     <div class="card prompt-1031" id="prompt-1031">
       <p class="kicker">1031 exchange</p>
       <h2>${esc(c.name)} is doing a 1031 exchange</h2>
-      <p>That usually means they are selling a property too, so they are a potential seller as well as a buyer.
-        Make them a <b>Buyer &amp; Seller</b> so you can add the property they are selling and match it with buyers?</p>
+      <p>They will need to buy a replacement property, so they are a potential buyer as well as a seller.
+        Make them a <b>Buyer &amp; Seller</b> so you can add what they want to buy and match them with listings?</p>
       <div class="row">
         <button class="btn small" id="make-both">Yes, make Buyer &amp; Seller</button>
         <button class="btn small ghost" id="not-now-1031">Not now</button>
@@ -835,10 +835,10 @@ async function viewClient(id) {
     mb.addEventListener('click', async () => {
       try {
         await api('PATCH', `/api/clients/${id}`, { type: 'both' });
-        toast('Now a Buyer & Seller. Add the property they are selling.');
+        toast('Now a Buyer & Seller. Add what they want to buy.');
         await viewClient(id);
-        const add = $('#add-prop');
-        if (add) { add.click(); add.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+        const eb = $('#edit-buyer');
+        if (eb) { eb.click(); eb.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
       } catch (err) { toast(err.message, true); }
     });
     $('#not-now-1031').addEventListener('click', () => { dismiss1031(id); $('#prompt-1031').remove(); });
@@ -854,10 +854,7 @@ async function viewClient(id) {
         const answers = readQuestionFields(Q.buyer, 'bq');
         await api('PATCH', `/api/clients/${id}`, { details: answers });
         toast('Answers saved');
-        if (answers.exchange_1031 === 'yes') undismiss1031(id);
         await viewClient(id);
-        const pr = $('#prompt-1031');
-        if (pr) pr.scrollIntoView({ behavior: 'smooth', block: 'center' });
       } catch (err) { toast(err.message, true); }
     });
   }
@@ -957,6 +954,16 @@ async function viewProperty(id, startEditing = false) {
       const body = { address: $('#p-addr').value, notes: $('#p-notes').value };
       if (sellerSide) body.details = readQuestionFields(Q.seller, 'sq');
       await api('PATCH', `/api/properties/${id}`, body);
+      if (body.details && body.details.exchange_1031 === 'yes' && p.details.exchange_1031 !== 'yes') {
+        undismiss1031(p.client_id);
+        if (p.client_type === 'seller'
+          && confirm(`${p.client_name} is doing a 1031 exchange, so they will buy a replacement property.\n\nMake them a Buyer & Seller and add what they want to buy?`)) {
+          await api('PATCH', `/api/clients/${p.client_id}`, { type: 'both' });
+          toast('Now a Buyer & Seller. Add what they want to buy.');
+          go(`#/client/${p.client_id}`);
+          return;
+        }
+      }
       if (onPage(`#/property/${id}/edit`)) { history.replaceState(null, '', `#/property/${id}`); }
       toast('Saved'); viewProperty(id);
     } catch (err) { toast(err.message, true); }
@@ -1085,8 +1092,9 @@ async function viewClientForm(id) {
           }
           if (addr) body.properties.unshift({ address: addr, details: answers });
         }
-        if (type === 'buyer' && body.details && body.details.exchange_1031 === 'yes'
-          && confirm('This buyer is doing a 1031 exchange, so they are probably selling a property too.\n\nSave them as a Buyer & Seller instead?')) {
+        const sold = (body.properties || [])[0];
+        if (type === 'seller' && sold && sold.details && sold.details.exchange_1031 === 'yes'
+          && confirm('This seller is doing a 1031 exchange, so they will buy a replacement property.\n\nSave them as a Buyer & Seller instead? You can add what they want to buy next.')) {
           body.type = 'both';
         }
         const r = await api('POST', '/api/clients', body);
