@@ -1659,9 +1659,9 @@ function pushAskHtml() {
   if (pushAskDismissed() || (st !== 'default' && st !== 'ios-install')) return '';
   return `<div class="card push-ask" id="push-ask">
       <p class="kicker">🔔 Don't miss messages</p>
-      <p>${st === 'ios-install'
-        ? 'Add JRP to your home screen (Share → Add to Home Screen), open it from there, then turn on notifications in <b>Me</b>.'
-        : 'Turn on notifications to get chat messages even when the app is closed.'}</p>
+      ${st === 'ios-install'
+        ? '<p>Add JRP to your home screen (Share → Add to Home Screen), open it from there, then turn on notifications in <b>Me</b>.</p>'
+        : ''}
       <div class="row">${st === 'default' ? '<button class="btn small" id="push-ask-on">Turn on</button>' : ''}
         <button class="btn small ghost" id="push-ask-later">Not now</button></div>
     </div>`;
