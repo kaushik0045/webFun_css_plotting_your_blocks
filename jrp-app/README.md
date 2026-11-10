@@ -58,7 +58,7 @@ jrp-app/
   - Price vs budget (55%): within budget = 100; each 1% over budget takes 5 points off.
   - Property type (25%): if the buyer picked types and this isn't one, the whole score is capped at 30.
   - Location (10%) and building size (10%) count only when the buyer has a preference.
-  - **Great** 85+, **Good** 70–84, **Average** 50–69, **Not a good match** under 50, **Not enough info** when a price or budget is missing.
+  - **Great** 85+, **Good** 70–84, **Average** 50–69, **Not a good match** under 50, **Missing: …** when an asking price or the buyer's Funds is blank (these are still ranked by how well the other details fit, and a wrong property type or state still shows as not a good match).
 - **See why** shows the price calculator (difference in dollars and %, how much the buyer would need to add, or how much the seller would need to drop) and how each rule scored.
 - Change the weights and bands in `MATCH_RULES` and `LEVELS` at the bottom of `src/questions.js`.
 
