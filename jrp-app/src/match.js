@@ -1,6 +1,6 @@
 // Matching engine: compares every buyer with every property for sale and
 // explains the result ("See why"). Rules and weights live in src/questions.js.
-const { SELLER_QUESTIONS, BUYER_QUESTIONS, MATCH_RULES, LEVELS, STATES } = require('./questions');
+const { SELLER_QUESTIONS, BUYER_QUESTIONS, MATCH_RULES, LEVELS, STATES, FUNDS_MULTIPLIER } = require('./questions');
 
 const blank = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 const money = (n) => '$' + Math.round(n).toLocaleString('en-US');
@@ -95,7 +95,10 @@ function placesOf(text) {
 // Score one rule. status: match | partial | miss | missing | any
 function scoreRule(rule, listing, buyer) {
   const s = listing.details[rule.seller];
-  const b = buyer.details[rule.buyer];
+  let b = buyer.details[rule.buyer];
+  // No Funds entered: buying power = 5 x down payment.
+  const estimated = rule.kind === 'price' && blank(b) && !blank(buyer.details.cash_injection);
+  if (estimated) b = Number(buyer.details.cash_injection) * FUNDS_MULTIPLIER;
   const base = { key: rule.key, label: rule.label, weight: rule.weight };
 
   if (rule.kind === 'price') {
@@ -107,7 +110,7 @@ function scoreRule(rule, listing, buyer) {
     const budget = Number(b);
     const diff = asking - budget;
     const cash = blank(buyer.details.cash_injection) ? null : Number(buyer.details.cash_injection);
-    const cashInfo = cash === null ? {} : { cash, cashPctOfAsking: asking ? (cash / asking) * 100 : 0 };
+    const cashInfo = { ...(cash === null ? {} : { cash, cashPctOfAsking: asking ? (cash / asking) * 100 : 0 }), ...(estimated ? { estimated: true } : {}) };
     if (diff <= 0) {
       const left = -diff;
       const leftPct = budget ? (left / budget) * 100 : 0;
@@ -251,7 +254,7 @@ const sortMatches = (a, b) => (ORDER[a.level] - ORDER[b.level]) || ((b.score ?? 
 
 function buyerSummary(b) {
   return { id: b.id, name: b.name, agent_name: b.agent_name, assigned_agent_id: b.assigned_agent_id,
-    budget: b.details.budget_max ?? null, cash: b.details.cash_injection ?? null, types: b.details.property_types || [],
+    budget: b.details.budget_max ?? (blank(b.details.cash_injection) ? null : Number(b.details.cash_injection) * FUNDS_MULTIPLIER), cash: b.details.cash_injection ?? null, types: b.details.property_types || [],
     brands: b.details.brands || [], states: b.details.states || null, exchange_1031: b.details.exchange_1031 === 'yes' };
 }
 function listingSummary(l) {

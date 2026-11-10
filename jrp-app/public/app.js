@@ -510,7 +510,8 @@ function questionFields(list, values, prefix) {
     const help = q.help ? `<span class="help">${esc(q.help)}</span>` : '';
     let input;
     if (q.type === 'money') {
-      input = `<div class="money-in"><span>$</span><input id="${id}" inputmode="decimal" autocomplete="off" placeholder="0" value="${isEmpty(v) ? '' : esc(Number(v).toLocaleString('en-US'))}"></div>`;
+      const auto = q.autoFrom ? ` data-auto-from="${prefix}-${esc(q.autoFrom.key)}" data-times="${Number(q.autoFrom.times)}"` : '';
+      input = `<div class="money-in"><span>$</span><input id="${id}" inputmode="decimal" autocomplete="off" placeholder="0"${auto} value="${isEmpty(v) ? '' : esc(Number(v).toLocaleString('en-US'))}"></div>`;
     } else if (q.type === 'number') {
       input = `<input id="${id}" inputmode="decimal" autocomplete="off" value="${isEmpty(v) ? '' : esc(v)}">`;
     } else if (q.type === 'select' || q.type === 'yesno') {
@@ -561,7 +562,7 @@ function whyHtml(m) {
     calc = `<div class="calc">
         <p class="calc-title">Price calculator</p>
         <div class="calc-row"><span>Seller is asking</span><b>${fmtMoney(c.asking)}</b></div>
-        <div class="calc-row"><span>Buyer's funds (total)</span><b>${fmtMoney(c.budget)}</b></div>
+        <div class="calc-row"><span>Buyer's funds (total)${c.estimated ? ' <small>(5 × down payment)</small>' : ''}</span><b>${fmtMoney(c.budget)}</b></div>
         ${c.cash !== undefined ? `<div class="calc-row"><span>Buyer's cash injection</span><b>${fmtMoney(c.cash)} <small>(${c.cashPctOfAsking.toFixed(1)}% of asking)</small></b></div>` : ''}
         <div class="calc-row total ${c.direction}"><span>${c.direction === 'over' ? 'Short of asking by' : c.difference === 0 ? 'Difference' : 'Left over after buying'}</span>
           <b>${fmtMoney(c.difference)} <small>(${c.pctOfBudget.toFixed(1)}% of funds)</small></b></div>
@@ -633,6 +634,26 @@ function bindMatchesCard(list, mode) {
 document.addEventListener('change', (e) => {
   if (!e.target.id) return;
   $$(`[data-showif="${CSS.escape(e.target.id)}"]`).forEach((f) => { f.hidden = e.target.value !== f.dataset.equals; });
+});
+
+// Funds fills itself in as 5 x the down payment, unless the agent typed their own number.
+const moneyVal = (el) => Number(String(el.value).replace(/[$,\s]/g, '')) || 0;
+document.addEventListener('focusin', (e) => {
+  const t = e.target;
+  if (t.id && t.dataset.prev === undefined && $(`[data-auto-from="${CSS.escape(t.id)}"]`)) t.dataset.prev = String(moneyVal(t));
+});
+document.addEventListener('input', (e) => {
+  const t = e.target;
+  if (!t.id || t.dataset.autoFrom) return;
+  $$(`[data-auto-from="${CSS.escape(t.id)}"]`).forEach((f) => {
+    const times = Number(f.dataset.times);
+    const prev = Number(t.dataset.prev || 0);
+    // Only replace Funds if it is empty or still equal to the old auto value.
+    if (f.value.trim() && moneyVal(f) !== Math.round(prev * times)) return;
+    const cash = moneyVal(t);
+    f.value = cash > 0 ? Math.round(cash * times).toLocaleString('en-US') : '';
+  });
+  t.dataset.prev = String(moneyVal(t));
 });
 
 // One click handler for every "See why" button on any screen.

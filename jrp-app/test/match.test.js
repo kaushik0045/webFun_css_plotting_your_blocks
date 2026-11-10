@@ -262,3 +262,15 @@ test('buyer without funds: wrong type is still "not a fit"; right type ranks by 
   const chevron = compare(noFunds, gasStation(1000000, { brand: 'Chevron' }));
   assert.ok(station.fitSoFar > chevron.fitSoFar, 'better brand fit ranks higher');
 });
+
+test('no Funds entered: buying power = 5 x down payment', () => {
+  const b = buyer({ property_types: ['Gas station'], cash_injection: 350000 });
+  const m = compare(b, gasStation(1750000));
+  const price = m.parts.find((p) => p.key === 'price');
+  assert.equal(price.calc.budget, 1750000);
+  assert.equal(price.calc.estimated, true);
+  assert.equal(m.level, 'great');
+  // An entered Funds number always wins over the estimate.
+  const own = compare(buyer({ property_types: ['Gas station'], cash_injection: 350000, budget_max: 1000000 }), gasStation(1750000));
+  assert.equal(own.parts.find((p) => p.key === 'price').calc.budget, 1000000);
+});

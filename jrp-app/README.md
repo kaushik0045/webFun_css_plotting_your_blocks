@@ -55,7 +55,7 @@ jrp-app/
 
 - **Questions** live in one file: `src/questions.js`. `BUYER_QUESTIONS` are asked once per buyer; `SELLER_QUESTIONS` are asked for each property a seller lists. Add, remove or reword questions there; the forms update automatically.
 - **Matching** compares every buyer with every property whose listing status is "For sale" and scores it 0–100:
-  - Price vs budget (55%): within budget = 100; each 1% over budget takes 5 points off.
+  - Price vs funds (50%); if Funds is blank, funds = 5 × down payment: within budget = 100; each 1% over budget takes 5 points off.
   - Property type (25%): if the buyer picked types and this isn't one, the whole score is capped at 30.
   - Location (10%) and building size (10%) count only when the buyer has a preference.
   - **Great** 85+, **Good** 70–84, **Average** 50–69, **Not a good match** under 50, **Missing: …** when an asking price or the buyer's Funds is blank (these are still ranked by how well the other details fit, and a wrong property type or state still shows as not a good match).

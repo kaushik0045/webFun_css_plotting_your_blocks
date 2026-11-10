@@ -90,8 +90,9 @@ const BUYER_QUESTIONS = [
   { key: 'states', label: 'State interested in', type: 'text',
     help: 'e.g. "CA" or "CA, NV" or "California". Leave blank for any state.' },
   { key: 'branding', label: 'Branded or independent?', type: 'select', options: ['Branded', 'Independent', 'Either'] },
-  { key: 'cash_injection', label: 'Cash injection', type: 'money', help: 'Cash they can put down.' },
-  { key: 'budget_max', label: 'Funds (total buying power)', type: 'money', help: 'The most they can pay, including any loan. Used to compare with asking prices.' },
+  { key: 'cash_injection', label: 'Cash injection (down payment)', type: 'money', help: 'Cash they can put down. Funds below fills in automatically.' },
+  { key: 'budget_max', label: 'Funds (total buying power)', type: 'money', autoFrom: { key: 'cash_injection', times: 5 },
+    help: 'Fills in automatically as 5 x the down payment. You can change it.' },
   { key: 'exchange_1031', label: '1031 exchange?', type: 'yesno', help: 'If yes, they probably have a property to sell too.' },
   { key: 'business_experience', label: 'Business experience?', type: 'yesno' },
   { key: 'experience_where', label: 'If yes, where?', type: 'text', showIf: { key: 'business_experience', equals: 'yes' } },
@@ -110,6 +111,9 @@ const BUYER_QUESTIONS = [
 //  weight = how much the rule counts toward the 0–100 score.
 //  dealBreaker = a miss caps the whole score at 30 ("Not a good match").
 // ----------------------------------------------------------------------------
+// Buying power = this many times the down payment (used when Funds is left blank).
+const FUNDS_MULTIPLIER = 5;
+
 const MATCH_RULES = [
   { key: 'price', label: 'Price vs funds', kind: 'price', seller: 'asking_price', buyer: 'budget_max', weight: 50, required: true },
   { key: 'type', label: 'Property type', kind: 'oneOf', seller: 'property_type', buyer: 'property_types', weight: 20, dealBreaker: true },
@@ -126,4 +130,4 @@ const LEVELS = [
   { level: 'poor', min: 0, label: 'Not a good match' },
 ];
 
-module.exports = { SELLER_QUESTIONS, BUYER_QUESTIONS, MATCH_RULES, LEVELS, PROPERTY_TYPES, LISTING_STATUSES, BRANDS, STATES };
+module.exports = { FUNDS_MULTIPLIER, SELLER_QUESTIONS, BUYER_QUESTIONS, MATCH_RULES, LEVELS, PROPERTY_TYPES, LISTING_STATUSES, BRANDS, STATES };
