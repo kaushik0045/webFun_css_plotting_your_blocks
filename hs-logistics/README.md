@@ -33,6 +33,8 @@ cd hs-logistics/dispatcher && npm install && npm run dev
 ```
 With no Supabase keys the dashboard opens in **demo mode**: 7 sample trucks moving on real interstates, sample loads, and working rate-con upload. Nothing is saved. Add `?demo` to the address to force demo mode later.
 
+The **📱 Driver phone** tab (demo only) shows what drivers see, sharing the same sample data: assign a load as boss and it appears on the phone; tap *I've arrived* on the phone and the boss's load board updates. Open `http://localhost:5173/?view=phone` to go straight to it.
+
 ## Setup (one time, ~30 minutes)
 
 ### 1. Create the Supabase project

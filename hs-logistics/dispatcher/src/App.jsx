@@ -4,17 +4,19 @@ import Login from './components/Login.jsx';
 import LiveMap from './components/LiveMap.jsx';
 import Loads from './components/Loads.jsx';
 import Drivers from './components/Drivers.jsx';
+import DriverPreview from './components/DriverPreview.jsx';
 
 const TABS = [
   { id: 'map', label: 'Live map' },
   { id: 'loads', label: 'Loads' },
   { id: 'drivers', label: 'Drivers' },
+  ...(demo ? [{ id: 'phone', label: '📱 Driver phone' }] : []),
 ];
 
 export default function App() {
   const [session, setSession] = useState(undefined);
   const [me, setMe] = useState(null);
-  const [tab, setTab] = useState('map');
+  const [tab, setTab] = useState(() => (demo && new URLSearchParams(location.search).get('view') === 'phone' ? 'phone' : 'map'));
 
   useEffect(() => {
     if (!configured) return;
@@ -81,6 +83,7 @@ function Dashboard({ tab, setTab, me }) {
         {tab === 'map' && <LiveMap {...data} />}
         {tab === 'loads' && <Loads {...data} />}
         {tab === 'drivers' && <Drivers {...data} />}
+        {tab === 'phone' && <DriverPreview {...data} />}
       </main>
     </div>
   );
