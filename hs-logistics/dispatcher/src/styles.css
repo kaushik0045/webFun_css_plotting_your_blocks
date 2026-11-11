@@ -142,3 +142,5 @@ code { background: #eef2f7; padding: 1px 4px; border-radius: 4px; }
   .topbar { gap: 8px; }
   .who span { display: none; }
 }
+
+.demo-banner { background: #fef3c7; color: #78350f; font-size: 13px; padding: 6px 16px; border-bottom: 1px solid #fde68a; flex-shrink: 0; }

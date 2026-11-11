@@ -27,6 +27,12 @@ Two apps that share one Supabase backend:
 
 ---
 
+## Try it first (demo mode)
+```bash
+cd hs-logistics/dispatcher && npm install && npm run dev
+```
+With no Supabase keys the dashboard opens in **demo mode**: 7 sample trucks moving on real interstates, sample loads, and working rate-con upload. Nothing is saved. Add `?demo` to the address to force demo mode later.
+
 ## Setup (one time, ~30 minutes)
 
 ### 1. Create the Supabase project

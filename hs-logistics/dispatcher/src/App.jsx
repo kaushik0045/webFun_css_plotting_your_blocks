@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { supabase, configured } from './supabase.js';
+import { supabase, configured, demo } from './supabase.js';
 import Login from './components/Login.jsx';
 import LiveMap from './components/LiveMap.jsx';
 import Loads from './components/Loads.jsx';
@@ -71,6 +71,11 @@ function Dashboard({ tab, setTab, me }) {
           <button className="link" onClick={() => supabase.auth.signOut()}>Sign out</button>
         </div>
       </header>
+      {demo && (
+        <div className="demo-banner">
+          Demo mode — sample trucks and loads, nothing is saved. Try the map, open a load, or upload a rate con PDF.
+        </div>
+      )}
       <main className={tab === 'map' ? 'main main-map' : 'main'}>
         {data.error && <div className="error">{data.error}</div>}
         {tab === 'map' && <LiveMap {...data} />}
