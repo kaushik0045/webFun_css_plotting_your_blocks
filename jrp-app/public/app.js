@@ -268,7 +268,7 @@ async function viewSearch() {
     </div>` : ''}
     <div class="searchbar">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-      <input id="q" type="search" placeholder="Name, phone, email or address" autocomplete="off" value="${esc(searchState.q)}" aria-label="Search clients">
+      <input id="q" type="search" placeholder="Name, phone or address" autocomplete="off" value="${esc(searchState.q)}" aria-label="Search clients">
     </div>
     <div class="filters-row">
       <div class="chips" role="group" aria-label="Buyer or seller">
@@ -330,13 +330,17 @@ async function runSearch() {
     ? `${rows.length} result${rows.length === 1 ? '' : 's'}`
     : 'Recently updated';
   $('#results').innerHTML = rows.length ? rows.map((r) => `
-    <li><a class="result" href="#/client/${r.id}">
+    <li class="result-wrap"><a class="result" href="#/client/${r.id}">
       <div class="spread"><span class="name">${esc(r.name)}</span>${badge(r.type)}</div>
       <div class="agent-line ${r.agent_name ? '' : 'none'}">${r.agent_name ? `Agent: ${esc(r.agent_name)}${r.agent_name === me.name ? ' (you)' : ''}` : 'Unassigned'}</div>
       <div class="meta">${[r.phone, r.email].filter(Boolean).map(esc).join(' · ') || 'No contact info'}</div>
       ${r.first_property ? `<div class="meta">${esc(r.first_property)}${r.property_count > 1 ? ` +${r.property_count - 1} more` : ''}</div>` : ''}
       ${lastNoteHtml(r.last_comment, r.last_comment_by, r.last_comment_at)}
-    </a></li>`).join('')
+    </a>${r.phone ? `
+    <div class="result-quick">
+      <a class="btn" href="${esc(telUrl(r.phone))}" aria-label="Call ${esc(r.name)}">📞 Call</a>
+      <a class="btn ghost" href="${esc(smsUrl(r.phone))}" aria-label="Text ${esc(r.name)}">💬 Text</a>
+    </div>` : ''}</li>`).join('')
     : `<li class="empty">No matches. <a href="#/new">Add a new buyer or seller</a></li>`;
 }
 
@@ -425,7 +429,7 @@ function reminderLine(r, { showClient = false } = {}) {
         ${r.note ? `<span class="rem-note">${esc(r.note)}</span>` : ''}
       </div>
       <div class="rem-actions">
-        ${showClient && r.client_phone ? `<a class="btn small" href="${esc(telUrl(r.client_phone))}">Call</a>` : ''}
+        ${showClient && r.client_phone ? `<a class="btn small" href="${esc(telUrl(r.client_phone))}">📞 Call</a>` : ''}
         ${mine ? `<a class="btn small ghost" href="/api/reminders/${r.id}/calendar.ics?k=${encodeURIComponent(r.cal_key || '')}" title="Add to calendar">📅</a>` : ''}
         ${mine || me.role === 'admin' ? `<button type="button" class="btn small ghost" data-rem-done="${r.id}">Done</button>` : ''}
       </div>
@@ -858,9 +862,9 @@ async function viewClient(id) {
         return lastNoteHtml(m.body, m.author, m.created_at, tag);
       })()}
       <div class="quick">
-        ${c.phone ? `<a class="btn small" href="${esc(telUrl(c.phone))}">Call</a>` : '<span></span>'}
-        ${c.phone ? `<a class="btn small ghost" href="sms:${esc(c.phone.replace(/[^\d+]/g, ''))}">Text</a>` : '<span></span>'}
-        ${c.email ? `<a class="btn small ghost" href="mailto:${esc(c.email)}">Email</a>` : '<span></span>'}
+        ${c.phone ? `<a class="btn" href="${esc(telUrl(c.phone))}">📞 Call</a>` : '<span></span>'}
+        ${c.phone ? `<a class="btn ghost" href="sms:${esc(c.phone.replace(/[^\d+]/g, ''))}">💬 Text</a>` : '<span></span>'}
+        ${c.email ? `<a class="btn ghost" href="mailto:${esc(c.email)}">✉️ Email</a>` : '<span></span>'}
       </div>
       ${c.reminders.length ? `<ul class="rem-list">${c.reminders.map((r) => reminderLine(r)).join('')}</ul>` : ''}
       <div class="grid2 head-actions">
@@ -1532,6 +1536,13 @@ function viewAccount() {
       <p class="muted">${esc(me.email)} · ${me.role === 'admin' ? 'Admin' : 'Staff'}</p>
       <button class="btn ghost" id="logout">Log out</button>
     </div>
+    <div class="card">
+      <h2>Text size</h2>
+      <p class="muted small">Bigger text and buttons for a quick glance.</p>
+      <div class="chips" id="size-chips" role="group" aria-label="Text size">
+        ${[['', 'Normal'], ['lg', 'Large'], ['xl', 'Extra large']].map(([v, l]) => `<button type="button" class="chip ${textSize() === v ? 'on' : ''}" data-size="${v}">${l}</button>`).join('')}
+      </div>
+    </div>
     <div class="card" id="push-card">${pushCardHtml()}</div>
     ${standalone ? '' : `
     <div class="card install-tip">
@@ -1554,6 +1565,10 @@ function viewAccount() {
     go('#/login');
   });
   bindPushCard();
+  $$('#size-chips .chip').forEach((b) => b.addEventListener('click', () => {
+    setTextSize(b.dataset.size);
+    $$('#size-chips .chip').forEach((x) => x.classList.toggle('on', x === b));
+  }));
   $('#pw-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
@@ -1689,6 +1704,15 @@ if ('serviceWorker' in navigator) {
     if (e.data.type === 'jrp-open' && e.data.url) location.href = e.data.url;
   });
 }
+
+// ---------- text size (remembered on this device) ----------
+function textSize() { try { return localStorage.getItem('jrp-text-size') || ''; } catch { return ''; } }
+function setTextSize(v) {
+  try { if (v) localStorage.setItem('jrp-text-size', v); else localStorage.removeItem('jrp-text-size'); } catch { /* ignore */ }
+  document.documentElement.classList.remove('text-lg', 'text-xl');
+  if (v) document.documentElement.classList.add(`text-${v}`);
+}
+setTextSize(textSize());
 
 // ---------- start ----------
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});

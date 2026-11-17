@@ -529,3 +529,60 @@ input[type=date], input[type=time] { min-height: 46px; }
 /* First question (Residential / Commercial): stands out, the rest appears after it */
 .field.q-lead { border: 2px solid var(--red); background: rgba(225, 6, 0, .08); padding: 14px 14px 12px; }
 .field.q-lead > label { font-size: .95rem; color: #fff; }
+
+/* ============================================================
+   On-the-go: bigger text and buttons on phones, readable at a glance
+   ============================================================ */
+html.text-lg { font-size: 112.5%; }
+html.text-xl { font-size: 125%; }
+body { font-size: .97rem; }
+.ni { display: none; width: 24px; height: 24px; }
+
+/* one-tap Call / Text on each client in the list */
+.result-wrap { margin-bottom: 12px; }
+.result-wrap .result { margin-bottom: 0; }
+.result-quick { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid var(--line); border-top: 0; }
+.result-quick .btn { min-height: 50px; border-width: 0; font-size: .82rem; letter-spacing: .08em; }
+.result-quick .btn.ghost { border-left: 1px solid var(--line); }
+.quick .btn { min-height: 52px; padding-left: 6px; padding-right: 6px; letter-spacing: .06em; }
+
+@media (max-width: 700px) {
+  body { font-size: 1.06rem; line-height: 1.55; }
+  h1 { font-size: 1.55rem; }
+  h2 { font-size: 1.08rem; letter-spacing: .04em; }
+  .kicker { font-size: .78rem; letter-spacing: .14em; }
+  .muted { color: #bdbdc5; }
+  .small, .rem-note, .result .meta, .last-note .ln-head { font-size: .93rem; }
+  .last-note .ln-body { font-size: .98rem; }
+
+  /* bigger, easier targets */
+  label { font-size: .8rem; letter-spacing: .07em; }
+  input, select, textarea { padding: 14px 15px; min-height: 52px; }
+  .btn { min-height: 54px; font-size: .86rem; letter-spacing: .08em; padding: 14px 18px; }
+  .btn.small { min-height: 48px; font-size: .8rem; letter-spacing: .06em; padding: 12px 14px; }
+  .chip { padding: 15px 18px; font-size: .8rem; letter-spacing: .06em; min-height: 50px; }
+  .check { padding: 12px 14px; font-size: 1rem; }
+  .check input { width: 22px; height: 22px; }
+  .searchbar input { padding: 17px 14px 17px 48px; font-size: 18px; }
+
+  /* client list: big names, clear phone numbers */
+  .result { padding: 16px; }
+  .result .name { font-size: 1.18rem; letter-spacing: .02em; }
+  .agent-line { font-size: .85rem; }
+  .rem { padding: 12px; }
+  .rem-who { font-size: 1.08rem; }
+  .rem-when { font-size: .8rem; }
+  .rem-actions .btn.small { min-width: 54px; }
+
+  /* bottom menu: icons with labels, tall enough for a thumb */
+  .ni { display: block; margin: 0 auto 4px; }
+  .topnav a { padding: 9px 2px 8px; font: 600 .72rem/1 var(--body); letter-spacing: 0; text-transform: none; }
+  .topnav a.cta { margin: 0; padding: 9px 2px 8px; border-top: 2px solid transparent; background: transparent; color: #fff; }
+  .topnav a.cta .ni { background: var(--red); border-radius: 50%; width: 30px; height: 30px; padding: 4px; margin-top: -3px; margin-bottom: 1px; }
+  .topnav a.cta.active { background: transparent; border-top-color: var(--red); }
+  .nav-badge { top: 3px; margin-right: -22px; min-width: 20px; height: 20px; line-height: 20px; font-size: .68rem; border-radius: 10px; }
+  body { padding-bottom: calc(78px + env(safe-area-inset-bottom)); }
+  .composer { bottom: calc(64px + env(safe-area-inset-bottom)); }
+}
+@media (max-width: 700px) { .topnav a span { white-space: nowrap; overflow-wrap: normal; word-break: normal; } }
+@media (max-width: 380px) { .topnav a { font-size: .66rem; } .searchbar input { font-size: 17px; } }
