@@ -315,3 +315,38 @@ test('nothing but Residential / Commercial is kept until it is picked; Land / Lo
   assert.equal(land.property_type, 'Land / Lot');
   assert.equal(land.asking_price, 200000);
 });
+
+// ---------- insurance helpers ----------
+// (insurance.js opens the database, so point it at a throwaway folder)
+if (!process.env.DATA_DIR) process.env.DATA_DIR = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'jrp-test-'));
+test('insurance: reads policy details from declarations text', () => {
+  const ins = require('../src/insurance');
+  const text = `NATIONWIDE GENERAL INSURANCE COMPANY RENEWAL COMMON DECLARATIONS Policy Number: ACP BP099 Named Insured: TEST LLC
+    Total Annual Premium $2,500.00 Policy Period: Effective From 05-10-2026 To 05-10-2027 12:01 AM`;
+  const g = ins.guessFields(text, []);
+  assert.equal(g.policy_number, 'ACP BP099');
+  assert.equal(g.start_date, '2026-05-10');
+  assert.equal(g.end_date, '2027-05-10');
+  assert.equal(g.premium, 2500);
+  assert.equal(g.carrier, 'Nationwide');
+  // A policy number already on file is recognized even with different spacing.
+  const k = ins.guessFields('Policy No: OA 1234567 Safeco Insurance', [{ id: 7, carrier: 'Safeco Insurance', policy_number: 'OA1234567' }]);
+  assert.equal(k.matched_policy_id, 7);
+  assert.equal(ins.toISODate('01/09/2027'), '2027-01-09');
+  assert.equal(ins.toISODate('01/109/2026'), null, 'typos are not turned into dates');
+  assert.equal(ins.toISODate(46396), '2027-01-09', 'Excel date numbers');
+});
+
+test('insurance: alert stage by days left', () => {
+  const ins = require('../src/insurance');
+  const plus = (n) => { const d = new Date(`${ins.today()}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  assert.equal(ins.dueAlert({ end_date: plus(90) }), null);
+  assert.equal(ins.dueAlert({ end_date: plus(55) }).kind, 'd60');
+  assert.equal(ins.dueAlert({ end_date: plus(30) }).kind, 'd30');
+  assert.equal(ins.dueAlert({ end_date: plus(3) }).kind, 'd7');
+  assert.equal(ins.dueAlert({ end_date: plus(0) }).kind, 'today');
+  assert.equal(ins.dueAlert({ end_date: plus(-1) }).kind, 'expired');
+  assert.equal(ins.policyStatus({ end_date: plus(20) }), 'due30');
+  assert.equal(ins.policyStatus({ end_date: plus(80) }), 'due90');
+  assert.equal(ins.policyStatus({ end_date: null }), 'nodate');
+});

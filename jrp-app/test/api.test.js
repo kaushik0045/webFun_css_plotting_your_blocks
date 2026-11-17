@@ -513,3 +513,24 @@ test('notifications: only real push services accepted; a device can be removed o
   assert.equal((await admin('GET', '/api/push/key')).data.devices, 0);
   assert.equal((await other('POST', '/api/push/subscribe', { subscription: { endpoint: 'https://web.push.apple.com/x', keys } }, { csrf: false })).status, 403, 'needs the app header');
 });
+
+test('insurance: admins only; renewal moves the old policy to history', async () => {
+  const staff = agent();
+  await staff('POST', '/api/login', { email: 'ca@test.com', password: 'ChatPass123' });
+  assert.equal((await staff('GET', '/api/insurance')).status, 403);
+  const p = await admin('POST', '/api/insurance/properties', { address: '1 Test Way, Modesto CA', kind: 'SFR' });
+  assert.equal(p.status, 200);
+  assert.equal((await admin('POST', `/api/insurance/properties/${p.data.id}/policies`, { carrier: 'Safeco' })).status, 400, 'expiration date required');
+  const old = await admin('POST', `/api/insurance/properties/${p.data.id}/policies`, { carrier: 'Safeco', policy_number: 'OA1', start_date: '2025-01-09', end_date: '2026-01-09', premium: '$1,000' });
+  assert.equal(old.status, 200);
+  let d = (await admin('GET', `/api/insurance/properties/${p.data.id}`)).data;
+  assert.equal(d.status, 'expired');
+  await admin('POST', `/api/insurance/properties/${p.data.id}/policies`, { carrier: 'Safeco', policy_number: 'OA1', start_date: '2099-01-09', end_date: '2100-01-09', replace: [old.data.id] });
+  d = (await admin('GET', `/api/insurance/properties/${p.data.id}`)).data;
+  assert.equal(d.status, 'active');
+  assert.equal(d.current.length, 1);
+  assert.equal(d.past[0].end_date, '2026-01-09');
+  assert.ok(d.history.some((h) => h.action === 'renewed'));
+  assert.equal((await admin('POST', `/api/insurance/properties/${p.data.id}/read-pdf`)).status, 400, 'needs a file');
+  assert.equal((await staff('GET', '/api/insurance/files/1')).status, 403);
+});

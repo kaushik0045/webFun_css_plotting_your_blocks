@@ -69,6 +69,7 @@ function go(hash) {
 function setNav(active) {
   document.getElementById('topbar').hidden = !me;
   document.getElementById('nav-admin').hidden = !(me && me.role === 'admin');
+  document.getElementById('nav-ins').hidden = !(me && me.role === 'admin');
   $$('.topnav a').forEach((a) => a.classList.toggle('active', a.dataset.nav === active));
 }
 
@@ -185,6 +186,11 @@ async function route() {
     if (parts[0] === 'chat') return await viewChatList();
     if (parts[0] === 'admin') return await viewAdmin();
     if (parts[0] === 'account') return await viewAccount();
+    if (parts[0] === 'insurance' && parts[1] === 'new') return viewInsuranceNew();
+    if (parts[0] === 'insurance' && parts[1] === 'import') return viewInsuranceImport();
+    if (parts[0] === 'insurance' && parts[1] === 'split') return await viewInsuranceSplit();
+    if (parts[0] === 'insurance' && parts[1]) return await viewInsuranceProperty(Number(parts[1]));
+    if (parts[0] === 'insurance') return await viewInsurance();
     $app.innerHTML = '<div class="empty">Page not found. <a href="#/">Go to search</a></div>';
   } catch (e) {
     setNav('search');
@@ -246,12 +252,20 @@ const searchState = { q: '', type: 'all', agent: '' };
 async function viewSearch() {
   const navAt = navToken;
   setNav('search');
-  const [team, myRem, unread] = await Promise.all([agents(), api('GET', '/api/reminders'), api('GET', '/api/chat/unread')]);
+  const [team, myRem, unread, insSum] = await Promise.all([agents(), api('GET', '/api/reminders'), api('GET', '/api/chat/unread'),
+    me.role === 'admin' ? api('GET', '/api/insurance/summary').catch(() => null) : null]);
+  const insAlert = insSum && (insSum.expired + insSum.due30) ? insSum : null;
   const ann = unread.latest_announcement;
   if (navAt !== navToken || !onPage('#/')) return;
   $app.innerHTML = `
     <p class="kicker">Client Book</p>
     <h1>Hi, ${esc(me.name.split(' ')[0])}</h1>
+    ${insAlert ? `
+    <a class="card ins-banner" href="#/insurance">
+      <span class="ab-k">🛡 Insurance needs attention</span>
+      <span class="ab-body">${[insAlert.expired && `${insAlert.expired} expired`, insAlert.due30 && `${insAlert.due30} due within 30 days`].filter(Boolean).join(' · ')}</span>
+      <span class="ab-open">Open →</span>
+    </a>` : ''}
     ${ann ? `
     <a class="card announce-banner" href="#/chat/announce">
       <span class="ab-k">📢 New announcement${unread.announce > 1 ? `s (${unread.announce})` : ''}</span>
@@ -1702,6 +1716,347 @@ if ('serviceWorker' in navigator) {
     if (!e.data) return;
     if (e.data.type === 'jrp-new-message') refreshUnread();
     if (e.data.type === 'jrp-open' && e.data.url) location.href = e.data.url;
+  });
+}
+
+// ---------- INSURANCE (admins): JRP's own properties, policies, renewals ----------
+const INS_LABEL = { expired: 'Expired', due30: 'Due soon', due90: 'Coming up', nodate: 'No end date', active: 'Active', none: 'No policy on file', info: 'Land / no policy' };
+const usDate = (iso) => (iso ? `${iso.slice(5, 7)}/${iso.slice(8, 10)}/${iso.slice(0, 4)}` : '—');
+function daysText(p) {
+  if (!p || p.days_left === null || p.days_left === undefined) return 'No expiration date on file';
+  const d = p.days_left;
+  if (d < 0) return `Expired ${-d} day${d === -1 ? '' : 's'} ago`;
+  if (d === 0) return 'Expires TODAY';
+  return `${d} day${d === 1 ? '' : 's'} left`;
+}
+const insFilter = { show: 'action', q: '' };
+
+async function viewInsurance() {
+  const navAt = navToken;
+  setNav('insurance');
+  if (me.role !== 'admin') { $app.innerHTML = '<div class="empty">Insurance is for admins only.</div>'; return; }
+  const d = await api('GET', '/api/insurance');
+  if (navAt !== navToken || !onPage('#/insurance')) return;
+  const s = d.summary;
+  const chips = [
+    ['action', 'Needs action', s.expired + s.due30 + s.none],
+    ['expired', 'Expired', s.expired], ['due30', 'Due ≤ 30 days', s.due30], ['due90', 'Due ≤ 90 days', s.due90],
+    ['active', 'Active', s.active], ['none', 'No policy', s.none], ['info', 'Land / info', s.info + s.nodate], ['all', 'All', d.properties.length],
+  ];
+  $app.innerHTML = `
+    <p class="kicker">Insurance · today ${esc(usDate(d.today))}</p>
+    <h1>Property insurance</h1>
+    <div class="ins-stats">
+      <a href="#" data-show="expired" class="ins-stat st-expired"><b>${s.expired}</b><span>Expired</span></a>
+      <a href="#" data-show="due30" class="ins-stat st-due30"><b>${s.due30}</b><span>Due in 30 days</span></a>
+      <a href="#" data-show="due90" class="ins-stat st-due90"><b>${s.due90}</b><span>Due in 90 days</span></a>
+      <a href="#" data-show="none" class="ins-stat st-none"><b>${s.none}</b><span>No policy</span></a>
+    </div>
+    <div class="row ins-tools">
+      <a class="btn small" href="#/insurance/new">+ Add property</a>
+      <a class="btn small ghost" href="#/insurance/import">Import Excel</a>
+      <a class="btn small ghost" href="#/insurance/split">Split a big PDF</a>
+    </div>
+    <div class="searchbar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="ins-q" type="search" placeholder="Address, company or policy #" value="${esc(insFilter.q)}" aria-label="Search insurance"></div>
+    <div class="chips" id="ins-chips">${chips.map(([k, l, n]) => `<button type="button" class="chip ${insFilter.show === k ? 'on' : ''}" data-show="${k}">${l} (${n})</button>`).join('')}</div>
+    <ul class="ins-list" id="ins-list"></ul>
+    ${d.properties.length ? '' : `<div class="card"><h2>Get started</h2><p>Import your insurance Excel sheet to load every property at once, or add properties one by one.</p>
+      <a class="btn" href="#/insurance/import">Import Excel</a></div>`}`;
+  const draw = () => {
+    const q = insFilter.q.trim().toLowerCase();
+    const list = d.properties.filter((p) => {
+      const st = insFilter.show;
+      const ok = st === 'all' || (st === 'action' ? ['expired', 'due30', 'none'].includes(p.status) : st === 'info' ? ['info', 'nodate'].includes(p.status) : p.status === st);
+      const hay = `${p.address} ${p.kind || ''} ${p.policies.map((x) => `${x.carrier || ''} ${x.policy_number || ''}`).join(' ')}`.toLowerCase();
+      return ok && (!q || hay.includes(q));
+    });
+    $('#ins-list').innerHTML = list.length ? list.map((p) => {
+      const n = p.next;
+      return `<li class="ins-item st-${esc(p.status)}">
+        <a class="ins-main" href="#/insurance/${p.id}">
+          <span class="ins-status">${esc(INS_LABEL[p.status])}</span>
+          <span class="ins-addr">${esc(p.address)}</span>
+          ${n ? `<span class="ins-exp">Expires <b>${esc(usDate(n.end_date))}</b> · ${esc(daysText(n))}</span>
+            <span class="ins-meta">${esc([n.carrier, n.policy_number].filter(Boolean).join(' · '))}${p.policies.length > 1 ? ` · +${p.policies.length - 1} more polic${p.policies.length > 2 ? 'ies' : 'y'}` : ''}</span>`
+          : `<span class="ins-meta">${esc(p.kind || '')}${p.notes ? ` · ${esc(p.notes)}` : ''}</span>`}
+        </a>
+        ${n && n.file_id ? `<a class="btn ghost ins-pdf" href="/api/insurance/files/${n.file_id}" target="_blank" rel="noopener">📄 Policy PDF</a>` : ''}
+      </li>`;
+    }).join('') : '<li class="empty">Nothing here.</li>';
+  };
+  draw();
+  $$('[data-show]').forEach((b) => b.addEventListener('click', (e) => {
+    e.preventDefault(); insFilter.show = b.dataset.show;
+    $$('#ins-chips .chip').forEach((c) => c.classList.toggle('on', c.dataset.show === insFilter.show)); draw();
+  }));
+  $('#ins-q').addEventListener('input', (e) => { insFilter.q = e.target.value; draw(); });
+}
+
+function policyFormHtml(p = {}, { prefix = 'pf', note = '' } = {}) {
+  const f = (k, label, type = 'text', extra = '') => `<div class="field"><label for="${prefix}-${k}">${label}</label>
+    <input id="${prefix}-${k}" type="${type}" value="${esc(p[k] ?? '')}" ${extra}></div>`;
+  return `${note}
+    <div class="grid2">${f('carrier', 'Insurance company *')}${f('policy_number', 'Policy number')}</div>
+    <div class="grid2">${f('start_date', 'Start date', 'date')}${f('end_date', 'Expiration date *', 'date', 'required')}</div>
+    <div class="grid2">${f('premium', 'Premium ($ per year)', 'text', 'inputmode="decimal"')}${f('coverage', 'Coverage (e.g. Building, Workers comp)')}</div>
+    ${f('agent', 'Agent / broker (name, phone)')}
+    <div class="field"><label for="${prefix}-notes">Notes</label><textarea id="${prefix}-notes" maxlength="4000">${esc(p.notes || '')}</textarea></div>`;
+}
+const readPolicyForm = (prefix = 'pf') => Object.fromEntries(['carrier', 'policy_number', 'start_date', 'end_date', 'premium', 'coverage', 'agent', 'notes']
+  .map((k) => [k, ($(`#${prefix}-${k}`) || {}).value || '']));
+
+function policyCardHtml(p, isCurrent) {
+  return `<div class="ins-policy st-${esc(p.status)}">
+      ${isCurrent ? `<p class="ins-big-exp"><span>Expires</span> <b>${esc(usDate(p.end_date))}</b></p>
+        <p class="ins-days">${esc(daysText(p))}</p>` : `<p class="muted small">${esc(usDate(p.start_date))} → ${esc(usDate(p.end_date))}</p>`}
+      <ul class="contact-list">
+        <li><span class="k">Company</span><span class="v">${esc(p.carrier || '—')}</span></li>
+        <li><span class="k">Policy #</span><span class="v">${esc(p.policy_number || '—')}</span></li>
+        ${p.coverage ? `<li><span class="k">Coverage</span><span class="v">${esc(p.coverage)}</span></li>` : ''}
+        <li><span class="k">Term</span><span class="v">${esc(usDate(p.start_date))} → ${esc(usDate(p.end_date))}</span></li>
+        <li><span class="k">Premium</span><span class="v">${p.premium !== null && p.premium !== undefined ? esc(fmtMoney(p.premium)) : '—'}</span></li>
+        ${p.agent ? `<li><span class="k">Agent</span><span class="v">${esc(p.agent)}</span></li>` : ''}
+        ${p.notes ? `<li><span class="k">Notes</span><span class="v" style="white-space:pre-wrap">${esc(p.notes)}</span></li>` : ''}
+      </ul>
+      <div class="row ins-pol-actions">
+        ${p.file_id ? `<a class="btn" href="/api/insurance/files/${p.file_id}" target="_blank" rel="noopener">📄 Open policy PDF${p.file_pages ? ` (${p.file_pages} p.)` : ''}</a>`
+          : `<label class="btn ghost file-btn">📎 Attach PDF<input type="file" accept="application/pdf,.pdf" data-attach="${p.id}" hidden></label>`}
+        ${isCurrent ? `<button type="button" class="btn ghost" data-edit-pol="${p.id}">Edit</button>` : ''}
+      </div>
+      <div id="edit-pol-${p.id}"></div>
+    </div>`;
+}
+
+async function viewInsuranceProperty(id) {
+  const navAt = navToken;
+  setNav('insurance');
+  const p = await api('GET', `/api/insurance/properties/${id}`);
+  if (navAt !== navToken || !onPage(`#/insurance/${id}`)) return;
+  const cur = p.current;
+  $app.innerHTML = `
+    <a href="#/insurance" class="back">← All insurance</a>
+    <div class="card ins-head st-${esc(p.status)}">
+      <span class="ins-status">${esc(INS_LABEL[p.status])}</span>
+      <h1>${esc(p.address)}</h1>
+      <p class="muted">${esc(p.kind || '')}</p>
+      ${p.notes ? `<p class="small">${esc(p.notes)}</p>` : ''}
+      <div class="row"><button type="button" class="btn small ghost" id="edit-prop">Edit property</button></div>
+      <div id="edit-prop-box"></div>
+    </div>
+
+    <div class="card">
+      <h2>Current insurance${cur.length > 1 ? ` (${cur.length} policies)` : ''}</h2>
+      ${cur.length ? cur.map((x) => policyCardHtml(x, true)).join('') : `<p class="muted">No current policy on file.</p>`}
+      <button type="button" class="btn small ghost" id="add-pol">+ Add a policy by hand</button>
+      <div id="add-pol-box"></div>
+    </div>
+
+    <div class="card renew-card">
+      <h2>⬆️ Upload renewed policy</h2>
+      <p class="small muted">Choose the new policy PDF. The app reads the company, policy number, dates and premium for you to check, then the old policy moves to history.</p>
+      <label class="btn file-btn">Choose PDF<input type="file" id="renew-file" accept="application/pdf,.pdf" hidden></label>
+      <div id="renew-box"></div>
+    </div>
+
+    ${p.past.length ? `<div class="card"><h2>Past policies (${p.past.length})</h2>${p.past.map((x) => policyCardHtml(x, false)).join('')}</div>` : ''}
+
+    <div class="card">
+      <h2>All PDFs (${p.files.length})</h2>
+      ${p.files.length ? `<ul class="file-list">${p.files.map((f) => `<li><a href="/api/insurance/files/${f.id}" target="_blank" rel="noopener">📄 ${esc(f.original_name)}</a>
+        <span class="muted small">${f.pages ? `${f.pages} pages · ` : ''}${esc(fmtDate(f.created_at))}${f.uploaded_by_name ? ` · ${esc(f.uploaded_by_name)}` : ''}</span></li>`).join('')}</ul>` : '<p class="muted">No PDFs yet.</p>'}
+    </div>
+
+    <div class="card">
+      <h2>History</h2>
+      <ul class="timeline">${p.history.map((h) => `<li><b>${esc(h.user_name || 'System')}</b> · ${esc(fmtDate(h.created_at))}<br><span class="small">${esc(h.action.replace(/_/g, ' '))}${h.detail ? `: ${esc(h.detail)}` : ''}</span></li>`).join('') || '<li class="muted">Nothing yet.</li>'}</ul>
+      <button type="button" class="btn small danger" id="del-prop">Remove this property</button>
+    </div>`;
+
+  const reload = () => viewInsuranceProperty(id);
+  // Upload renewed policy -> read it -> confirm -> save
+  $('#renew-file').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const box = $('#renew-box');
+    box.innerHTML = '<p class="muted">Reading the PDF…</p>';
+    const fd = new FormData(); fd.append('file', file);
+    try {
+      const r = await api('POST', `/api/insurance/properties/${id}/read-pdf`, fd);
+      const g = r.guess || {};
+      const replaceable = cur.filter((x) => !g.matched_policy_id || x.id === g.matched_policy_id || cur.length === 1);
+      const note = r.scanned
+        ? '<p class="warn">This PDF is a scanned image, so it could not be read automatically. Please type the details.</p>'
+        : `<p class="ok-note">✓ Read from the PDF${g.end_date ? '' : ' (no dates found, please add them)'}. Check the details, then save.</p>`;
+      box.innerHTML = `<form id="renew-form">${policyFormHtml({ ...g, coverage: (cur[0] || {}).coverage, agent: (cur[0] || {}).agent }, { prefix: 'rn', note })}
+        ${cur.length ? `<div class="field"><span class="label">This renews (moves to history):</span>${cur.map((x) => `
+          <label class="check inline"><input type="checkbox" name="replace" value="${x.id}" ${replaceable.includes(x) ? 'checked' : ''}>
+          <span>${esc([x.carrier, x.policy_number, `exp. ${usDate(x.end_date)}`].filter(Boolean).join(' · '))}</span></label>`).join('')}</div>` : ''}
+        <p class="error" id="rn-err"></p>
+        <div class="row"><button class="btn" type="submit">Save renewal</button><button class="btn ghost" type="button" id="rn-cancel">Cancel</button></div></form>`;
+      $('#rn-cancel').addEventListener('click', () => { box.innerHTML = ''; e.target.value = ''; });
+      $('#renew-form').addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        try {
+          await api('POST', `/api/insurance/properties/${id}/policies`, {
+            ...readPolicyForm('rn'), file_id: r.file_id, replace: $$('#renew-form input[name=replace]:checked').map((i) => Number(i.value)),
+          });
+          toast('Renewal saved'); reload();
+        } catch (err) { $('#rn-err').textContent = err.message; }
+      });
+    } catch (err) { box.innerHTML = `<p class="error">${esc(err.message)}</p>`; }
+  });
+  // Add by hand
+  $('#add-pol').addEventListener('click', () => {
+    $('#add-pol-box').innerHTML = `<form id="add-form">${policyFormHtml({}, { prefix: 'ap' })}
+      <p class="error" id="ap-err"></p><div class="row"><button class="btn" type="submit">Save policy</button></div></form>`;
+    $('#add-form').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      try { await api('POST', `/api/insurance/properties/${id}/policies`, readPolicyForm('ap')); toast('Saved'); reload(); }
+      catch (err) { $('#ap-err').textContent = err.message; }
+    });
+  });
+  // Edit a current policy
+  $$('[data-edit-pol]').forEach((b) => b.addEventListener('click', () => {
+    const pol = cur.find((x) => x.id === Number(b.dataset.editPol));
+    const slot = $(`#edit-pol-${pol.id}`);
+    slot.innerHTML = `<form id="ep-form-${pol.id}">${policyFormHtml(pol, { prefix: `ep${pol.id}` })}
+      <p class="error" id="ep-err-${pol.id}"></p>
+      <div class="row"><button class="btn" type="submit">Save</button><button class="btn danger" type="button" id="ep-del-${pol.id}">Delete policy</button></div></form>`;
+    $(`#ep-form-${pol.id}`).addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      try { await api('PATCH', `/api/insurance/policies/${pol.id}`, readPolicyForm(`ep${pol.id}`)); toast('Saved'); reload(); }
+      catch (err) { $(`#ep-err-${pol.id}`).textContent = err.message; }
+    });
+    $(`#ep-del-${pol.id}`).addEventListener('click', async () => {
+      if (!confirm('Delete this policy record? (Its PDF stays in "All PDFs".)')) return;
+      try { await api('DELETE', `/api/insurance/policies/${pol.id}`); toast('Deleted'); reload(); } catch (err) { toast(err.message, true); }
+    });
+  }));
+  // Attach a PDF to a policy that has none
+  $$('[data-attach]').forEach((inp) => inp.addEventListener('change', async () => {
+    const fd = new FormData(); fd.append('file', inp.files[0]);
+    try { await api('POST', `/api/insurance/policies/${inp.dataset.attach}/file`, fd); toast('PDF attached'); reload(); } catch (err) { toast(err.message, true); }
+  }));
+  // Edit / delete property
+  $('#edit-prop').addEventListener('click', () => {
+    $('#edit-prop-box').innerHTML = `<form id="prop-form">
+      <div class="field"><label for="ip-addr">Address</label><input id="ip-addr" value="${esc(p.address)}" required maxlength="300"></div>
+      <div class="field"><label for="ip-kind">Type (e.g. SFR, Gas station, Land)</label><input id="ip-kind" value="${esc(p.kind || '')}" maxlength="80"></div>
+      <div class="field"><label for="ip-notes">Notes</label><textarea id="ip-notes" maxlength="2000">${esc(p.notes || '')}</textarea></div>
+      <button class="btn" type="submit">Save</button></form>`;
+    $('#prop-form').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      try { await api('PATCH', `/api/insurance/properties/${id}`, { address: $('#ip-addr').value, kind: $('#ip-kind').value, notes: $('#ip-notes').value }); toast('Saved'); reload(); }
+      catch (err) { toast(err.message, true); }
+    });
+  });
+  $('#del-prop').addEventListener('click', async () => {
+    if (!confirm(`Remove ${p.address} and all its insurance records and PDFs?`)) return;
+    try { await api('DELETE', `/api/insurance/properties/${id}`); toast('Removed'); go('#/insurance'); } catch (err) { toast(err.message, true); }
+  });
+}
+
+function viewInsuranceNew() {
+  setNav('insurance');
+  $app.innerHTML = `<a href="#/insurance" class="back">← All insurance</a>
+    <div class="card"><h1>Add property</h1><form id="np-form">
+      <div class="field"><label for="np-addr">Address *</label><input id="np-addr" required maxlength="300" placeholder="e.g. 123 Main St, Modesto CA"></div>
+      <div class="field"><label for="np-kind">Type (e.g. SFR, Gas station, Land)</label><input id="np-kind" maxlength="80"></div>
+      <p class="muted small">Optional: add its current policy now.</p>
+      ${policyFormHtml({}, { prefix: 'np' })}
+      <p class="error" id="np-err"></p><button class="btn" type="submit">Save</button></form></div>`;
+  $('#np-end_date').removeAttribute('required');
+  $('#np-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const r = await api('POST', '/api/insurance/properties', { address: $('#np-addr').value, kind: $('#np-kind').value });
+      const pol = readPolicyForm('np');
+      if (pol.carrier || pol.policy_number || pol.end_date) {
+        try { await api('POST', `/api/insurance/properties/${r.id}/policies`, pol); } catch (err) { toast(`Property saved, but the policy was not: ${err.message}`, true); }
+      }
+      toast('Saved'); go(`#/insurance/${r.id}`);
+    } catch (err) { $('#np-err').textContent = err.message; }
+  });
+}
+
+function viewInsuranceImport() {
+  setNav('insurance');
+  $app.innerHTML = `<a href="#/insurance" class="back">← All insurance</a>
+    <div class="card"><h1>Import from Excel</h1>
+      <p>Choose your insurance workbook (.xlsx). The app reads the sheets with "Insurance" in the name (and the vehicles sheet), adds every property and policy, and uses the "Renew" sheet for newer terms.</p>
+      <p class="muted small">Safe to run again: nothing is added twice.</p>
+      <label class="btn file-btn">Choose Excel file<input type="file" id="imp-file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden></label>
+      <div id="imp-out"></div></div>`;
+  $('#imp-file').addEventListener('change', async (e) => {
+    const fd = new FormData(); fd.append('file', e.target.files[0]);
+    $('#imp-out').innerHTML = '<p class="muted">Importing…</p>';
+    try {
+      const r = await api('POST', '/api/insurance/import', fd);
+      $('#imp-out').innerHTML = `<p class="ok-note">✓ Done: ${r.properties_added} properties added, ${r.policies_added} policies added, ${r.renewals} renewals, ${r.policies_updated} updated.</p>
+        <p class="muted small">Sheets read: ${r.sheets.map((s) => `${esc(s.name)} (${s.rows} rows)`).join(', ') || 'none found'}</p>
+        <a class="btn" href="#/insurance">See insurance</a>`;
+    } catch (err) { $('#imp-out').innerHTML = `<p class="error">${esc(err.message)}</p>`; }
+  });
+}
+
+// "39,40,41,43" -> "39-41, 43"
+function pagesLabel(list) {
+  const out = []; let a = null; let b = null;
+  for (const n of list) { if (a === null) { a = b = n; } else if (n === b + 1) b = n; else { out.push(a === b ? `${a}` : `${a}-${b}`); a = b = n; } }
+  if (a !== null) out.push(a === b ? `${a}` : `${a}-${b}`);
+  return out.join(', ');
+}
+
+async function viewInsuranceSplit() {
+  setNav('insurance');
+  const props = (await api('GET', '/api/insurance')).properties.slice().sort((a, b) => a.address.localeCompare(b.address));
+  const opts = (sel = []) => `<option value="">+ Add a property…</option>${props.map((p) => `<option value="${p.id}" ${sel.includes(p.id) ? 'disabled' : ''}>${esc(p.address)}</option>`).join('')}`;
+  $app.innerHTML = `<a href="#/insurance" class="back">← All insurance</a>
+    <div class="card"><h1>Split a big PDF</h1>
+      <p>Upload one large policy PDF (up to 150 MB). The app finds which pages belong to which property, using the policy numbers and addresses on file, and saves each property's pages as its own PDF.</p>
+      <label class="btn file-btn">Choose PDF<input type="file" id="sp-file" accept="application/pdf,.pdf" hidden></label>
+      <div id="sp-out"></div></div>`;
+  $('#sp-file').addEventListener('change', async (e) => {
+    const out = $('#sp-out');
+    out.innerHTML = '<p class="muted">Reading every page… (large files can take a minute)</p>';
+    const fd = new FormData(); fd.append('file', e.target.files[0]);
+    let a;
+    try { a = await api('POST', '/api/insurance/split', fd); } catch (err) { out.innerHTML = `<p class="error">${esc(err.message)}</p>`; return; }
+    const groups = a.groups.map((g) => ({ pages: g.dec_pages.length ? pagesLabel(g.dec_pages) : `${g.from}-${g.to}`, all: `${g.from}-${g.to}`, dec: g.dec_pages, ids: g.property_ids.slice() }));
+    const draw = () => {
+      out.innerHTML = `<p class="ok-note">✓ ${a.total} pages read${a.scanned ? ' (scanned: no text found, so pick the pages by hand)' : ''}.</p>
+        ${groups.map((g, i) => `<div class="split-group">
+          <div class="field"><label for="sg-pages-${i}">Pages</label><input id="sg-pages-${i}" value="${esc(g.pages)}" placeholder="e.g. 39-49"></div>
+          <div class="row">
+            ${g.dec.length ? `<button type="button" class="btn small ${g.pages === pagesLabel(g.dec) ? '' : 'ghost'}" data-dec="${i}">Declarations only (${g.dec.length} p.)</button>` : ''}
+            <button type="button" class="btn small ${g.pages === g.all ? '' : 'ghost'}" data-all="${i}">All pages ${esc(g.all)}</button>
+          </div>
+          <span class="label">Save to</span>
+          <div class="chips wrap">${g.ids.map((pid) => `<span class="chip on">${esc((props.find((p) => p.id === pid) || {}).address || '?')} <button type="button" class="x" data-rm="${i}:${pid}" aria-label="Remove">✕</button></span>`).join('') || '<span class="muted small">No property matched. Pick one below.</span>'}</div>
+          <select data-add="${i}">${opts(g.ids)}</select>
+        </div>`).join('')}
+        <button type="button" class="btn small ghost" id="sp-more">+ Another page range</button>
+        <p class="error" id="sp-err"></p>
+        <button type="button" class="btn block" id="sp-save">Save PDFs to properties</button>`;
+      groups.forEach((g, i) => $(`#sg-pages-${i}`).addEventListener('input', (ev) => { g.pages = ev.target.value; }));
+      $$('[data-dec]').forEach((b) => b.addEventListener('click', () => { const g = groups[b.dataset.dec]; g.pages = pagesLabel(g.dec); draw(); }));
+      $$('[data-all]').forEach((b) => b.addEventListener('click', () => { const g = groups[b.dataset.all]; g.pages = g.all; draw(); }));
+      $$('[data-rm]').forEach((b) => b.addEventListener('click', () => { const [i, pid] = b.dataset.rm.split(':').map(Number); groups[i].ids = groups[i].ids.filter((x) => x !== pid); draw(); }));
+      $$('[data-add]').forEach((s) => s.addEventListener('change', () => { if (s.value) { groups[s.dataset.add].ids.push(Number(s.value)); draw(); } }));
+      $('#sp-more').addEventListener('click', () => { groups.push({ pages: '', all: `1-${a.total}`, dec: [], ids: [] }); draw(); });
+      $('#sp-save').addEventListener('click', async () => {
+        const send = groups.filter((g) => g.ids.length && g.pages.trim()).map((g) => ({ pages: g.pages, property_ids: g.ids }));
+        if (!send.length) { $('#sp-err').textContent = 'Pick at least one property and page range.'; return; }
+        try {
+          const r = await api('POST', `/api/insurance/split/${a.split_id}/save`, { groups: send });
+          out.innerHTML = `<p class="ok-note">✓ Saved ${r.saved.length} PDF${r.saved.length === 1 ? '' : 's'}:</p><ul class="file-list">${r.saved.map((x) => `
+            <li><a href="#/insurance/${x.property_id}">${esc((props.find((p) => p.id === x.property_id) || {}).address || '')}</a> <span class="muted small">pages ${esc(x.pages)}</span></li>`).join('')}</ul>
+            <a class="btn" href="#/insurance">Back to insurance</a>`;
+        } catch (err) { $('#sp-err').textContent = err.message; }
+      });
+    };
+    draw();
   });
 }
 

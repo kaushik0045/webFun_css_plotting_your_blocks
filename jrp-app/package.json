@@ -19,6 +19,8 @@
     "express-session": "^1.19.0",
     "helmet": "^8.3.0",
     "multer": "^2.5.0",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.4.299",
     "web-push": "^3.6.7"
   },
   "private": true,

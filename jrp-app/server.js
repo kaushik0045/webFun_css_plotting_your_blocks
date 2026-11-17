@@ -805,6 +805,9 @@ app.delete('/api/files/:id', requireAuth, requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- insurance (admins) ----------
+require('./src/insuranceRoutes')(app, { requireAuth, requireAdmin, fail, push });
+
 // ---------- front end ----------
 app.get('/healthz', (req, res) => res.json({ ok: true }));
 app.use('/api', (req, res) => fail(res, 404, 'Not found'));

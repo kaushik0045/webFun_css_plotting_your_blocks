@@ -586,3 +586,48 @@ body { font-size: .97rem; }
 }
 @media (max-width: 700px) { .topnav a span { white-space: nowrap; overflow-wrap: normal; word-break: normal; } }
 @media (max-width: 380px) { .topnav a { font-size: .66rem; } .searchbar input { font-size: 17px; } }
+
+/* ============================== Insurance ============================== */
+.ins-banner { display: grid; gap: 4px; text-decoration: none; color: inherit; border: 2px solid var(--red); background: linear-gradient(180deg, rgba(225, 6, 0, .16), var(--ink)); }
+.ins-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0 14px; }
+.ins-stat { display: grid; text-decoration: none; color: #fff; background: var(--ink); border: 1px solid var(--line); border-top: 4px solid var(--line-2); padding: 10px 8px; text-align: center; }
+.ins-stat b { font: 700 1.8rem/1 var(--head); }
+.ins-stat span { font-size: .75rem; color: var(--muted); margin-top: 4px; line-height: 1.2; }
+.st-expired.ins-stat { border-top-color: var(--red); } .st-due30.ins-stat { border-top-color: #f97316; }
+.st-due90.ins-stat { border-top-color: #eab308; } .st-none.ins-stat { border-top-color: #a855f7; }
+@media (max-width: 440px) { .ins-stats { grid-template-columns: repeat(2, 1fr); } }
+.ins-tools { margin-bottom: 14px; }
+.ins-list { list-style: none; margin: 0; padding: 0; }
+.ins-item { display: flex; gap: 10px; align-items: stretch; background: var(--ink); border: 1px solid var(--line); border-left: 6px solid var(--line-2); margin-bottom: 10px; }
+.ins-main { flex: 1; min-width: 0; display: grid; gap: 3px; padding: 14px 14px 12px; text-decoration: none; color: inherit; }
+.ins-addr { font: 700 1.12rem/1.25 var(--head); color: #fff; }
+.ins-exp { font-size: 1rem; color: #fff; }
+.ins-exp b { font-size: 1.1rem; }
+.ins-meta { font-size: .85rem; color: var(--muted); }
+.ins-status { justify-self: start; font: 700 .7rem/1 var(--head); letter-spacing: .1em; text-transform: uppercase; padding: 5px 8px; background: #3a3a40; color: #fff; }
+.ins-pdf { align-self: center; margin-right: 10px; white-space: nowrap; }
+.st-expired { border-left-color: var(--red); } .st-expired .ins-status { background: var(--red); }
+.st-due30 { border-left-color: #f97316; } .st-due30 .ins-status { background: #f97316; color: #111; }
+.st-due90 { border-left-color: #eab308; } .st-due90 .ins-status { background: #eab308; color: #111; }
+.st-active { border-left-color: #22c55e; } .st-active .ins-status { background: #16a34a; }
+.st-none { border-left-color: #a855f7; } .st-none .ins-status { background: #7e22ce; }
+.st-info .ins-status, .st-nodate .ins-status { background: #3a3a40; }
+@media (max-width: 560px) { .ins-item { flex-direction: column; } .ins-pdf { margin: 0 12px 12px; align-self: stretch; } }
+.ins-head { border-left: 6px solid var(--line-2); }
+.ins-head h1 { margin-top: 10px; }
+.ins-policy { border: 1px solid var(--line); border-left: 6px solid var(--line-2); padding: 14px; margin-bottom: 14px; background: var(--ink-2); }
+.ins-big-exp { margin: 0; font: 700 1.6rem/1.2 var(--head); color: #fff; }
+.ins-big-exp span { font-size: .9rem; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; }
+.ins-days { margin: 2px 0 10px; font-weight: 600; }
+.st-expired .ins-days { color: #ff6b66; } .st-due30 .ins-days { color: #fb923c; } .st-due90 .ins-days { color: #facc15; } .st-active .ins-days { color: #4ade80; }
+.ins-pol-actions { margin-top: 12px; }
+.renew-card { border: 2px solid var(--red); }
+.file-btn { position: relative; }
+.ok-note { color: #4ade80; font-weight: 600; }
+.file-list { list-style: none; margin: 0; padding: 0; }
+.file-list li { padding: 10px 0; border-bottom: 1px solid var(--line); display: grid; gap: 2px; }
+.split-group { border: 1px solid var(--line); padding: 12px; margin: 12px 0; background: var(--ink-2); }
+.split-group select { margin-top: 8px; }
+.chips.wrap { flex-wrap: wrap; overflow: visible; margin: 6px 0 0; }
+.chip .x { background: none; border: 0; color: #fff; font-size: .9rem; margin-left: 6px; cursor: pointer; padding: 0 2px; }
+.label { display: block; margin: 10px 0 6px; font: 700 .7rem/1.2 var(--head); letter-spacing: .12em; text-transform: uppercase; color: #fff; }
