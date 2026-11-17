@@ -31,8 +31,10 @@ module.exports = function mount(app, { requireAuth, requireAdmin, fail, push }) 
   app.post('/api/insurance/properties', ...guard, (req, res) => {
     const address = String(req.body.address || '').trim().slice(0, 300);
     if (!address) return fail(res, 400, 'Address is required');
-    const r = db.prepare('INSERT INTO ins_properties (address, kind, notes, created_at) VALUES (?,?,?,?)')
-      .run(address, String(req.body.kind || '').trim().slice(0, 80) || null, String(req.body.notes || '').trim().slice(0, 2000) || null, new Date().toISOString());
+    const kind = String(req.body.kind || '').trim().slice(0, 80) || null;
+    const category = ins.CATEGORIES.includes(req.body.category) ? req.body.category : ins.categoryOf(kind, address);
+    const r = db.prepare('INSERT INTO ins_properties (address, kind, category, notes, created_at) VALUES (?,?,?,?,?)')
+      .run(address, kind, category, String(req.body.notes || '').trim().slice(0, 2000) || null, new Date().toISOString());
     ins.log(Number(r.lastInsertRowid), req.user.id, 'created', 'Property added');
     res.json({ id: Number(r.lastInsertRowid) });
   });
@@ -45,10 +47,12 @@ module.exports = function mount(app, { requireAuth, requireAdmin, fail, push }) 
     const p = prop(req, res); if (!p) return;
     const address = req.body.address !== undefined ? String(req.body.address).trim().slice(0, 300) : p.address;
     if (!address) return fail(res, 400, 'Address is required');
-    db.prepare('UPDATE ins_properties SET address = ?, kind = ?, notes = ? WHERE id = ?').run(address,
-      req.body.kind !== undefined ? String(req.body.kind).trim().slice(0, 80) || null : p.kind,
+    if (req.body.category !== undefined && !ins.CATEGORIES.includes(req.body.category)) return fail(res, 400, 'Unknown property type');
+    const category = req.body.category !== undefined ? req.body.category : p.category;
+    db.prepare('UPDATE ins_properties SET address = ?, kind = ?, category = ?, notes = ? WHERE id = ?').run(address,
+      req.body.kind !== undefined ? String(req.body.kind).trim().slice(0, 80) || null : p.kind, category,
       req.body.notes !== undefined ? String(req.body.notes).trim().slice(0, 2000) || null : p.notes, p.id);
-    ins.log(p.id, req.user.id, 'edited', 'Property details changed');
+    ins.log(p.id, req.user.id, 'edited', category !== p.category ? `Type changed to ${category}` : 'Property details changed');
     res.json({ ok: true });
   });
   app.delete('/api/insurance/properties/:id', ...guard, (req, res) => {

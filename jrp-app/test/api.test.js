@@ -566,3 +566,21 @@ test('invoices: upload, the 3 questions, paid / unpaid, admins only', async () =
   assert.equal(list.counts.unpaid, 0);
   assert.equal((await staff('GET', `/api/invoices/${saved.data.id}/file`)).status, 403);
 });
+
+test('insurance: property types, land = not required, delete', async () => {
+  const a = await admin('POST', '/api/insurance/properties', { address: '7 Gas Ln, Ceres CA', category: 'gas' });
+  await admin('POST', `/api/insurance/properties/${a.data.id}/policies`, { carrier: 'X', end_date: '2000-01-01' });
+  let d = (await admin('GET', `/api/insurance/properties/${a.data.id}`)).data;
+  assert.equal(d.category, 'gas');
+  assert.equal(d.status, 'expired');
+  assert.equal((await admin('PATCH', `/api/insurance/properties/${a.data.id}`, { category: 'spaceship' })).status, 400);
+  await admin('PATCH', `/api/insurance/properties/${a.data.id}`, { category: 'land' });
+  d = (await admin('GET', `/api/insurance/properties/${a.data.id}`)).data;
+  assert.equal(d.status, 'notreq', 'land never needs insurance');
+  const sum = (await admin('GET', '/api/insurance/summary')).data;
+  assert.ok(sum.sections.land >= 1);
+  const pol = d.current[0].id;
+  assert.equal((await admin('DELETE', `/api/insurance/policies/${pol}`)).status, 200);
+  assert.equal((await admin('DELETE', `/api/insurance/properties/${a.data.id}`)).status, 200);
+  assert.equal((await admin('GET', `/api/insurance/properties/${a.data.id}`)).status, 404);
+});

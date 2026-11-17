@@ -60,6 +60,26 @@ CREATE TABLE IF NOT EXISTS ins_log (
 );
 `);
 
+// Property type = which section it shows in. Land needs no insurance ("Not required").
+const CATEGORIES = ['gas', 'rental', 'truck', 'commercial', 'hotel', 'other', 'land'];
+if (!db.prepare('PRAGMA table_info(ins_properties)').all().some((c) => c.name === 'category')) {
+  db.exec('ALTER TABLE ins_properties ADD COLUMN category TEXT');
+}
+function categoryOf(kind, address = '') {
+  const k = `${kind || ''}`.toLowerCase();
+  if (/truck/.test(k)) return 'truck';
+  if (/gas|fuel|station/.test(k)) return 'gas';
+  if (/land|agri|farm|vacant|acre/.test(k)) return 'land';
+  if (/hotel|motel/.test(k)) return 'hotel';
+  if (/sfr|single|rental|multi|residen|duplex|condo|apartment|house|home/.test(k)) return 'rental';
+  if (/office|retail|commercial|warehouse|industrial|plaza|center/.test(k)) return 'commercial';
+  if (!k && /acre/i.test(address)) return 'land';
+  return 'other';
+}
+for (const r of db.prepare('SELECT id, kind, address FROM ins_properties WHERE category IS NULL').all()) {
+  db.prepare('UPDATE ins_properties SET category = ? WHERE id = ?').run(categoryOf(r.kind, r.address), r.id);
+}
+
 const now = () => new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 const TZ = process.env.TZ_OFFICE || 'America/Los_Angeles';
 // Today's date at the office, as YYYY-MM-DD.
@@ -97,7 +117,7 @@ function toMoney(v) {
 const cleanText = (v, max = 300) => (v === null || v === undefined ? null : String(v).replace(/\s+/g, ' ').trim().slice(0, max) || null);
 
 // ---------- status ----------
-const ORDER = { expired: 0, due30: 1, nodate: 2, due90: 3, active: 4, none: 5, info: 6 };
+const ORDER = { expired: 0, due30: 1, nodate: 2, due90: 3, active: 4, none: 5, notreq: 6 };
 function policyStatus(p) {
   const d = daysLeft(p.end_date);
   if (d === null) return 'nodate';
@@ -106,7 +126,9 @@ function policyStatus(p) {
   if (d <= 90) return 'due90';
   return 'active';
 }
-const isLandLike = (kind) => /land|agri|farm/i.test(kind || '');
+// Land: no insurance needed, whatever is on file.
+const propStatus = (pr, current) => (pr.category === 'land' ? 'notreq'
+  : current.length ? current.slice().sort((a, b) => ORDER[a.status] - ORDER[b.status])[0].status : 'none');
 
 function policyRow(p) {
   return { ...p, days_left: daysLeft(p.end_date), status: policyStatus(p) };
@@ -119,7 +141,7 @@ function listProperties() {
   for (const p of pols) { if (!byProp.has(p.property_id)) byProp.set(p.property_id, []); byProp.get(p.property_id).push(p); }
   return props.map((pr) => {
     const current = (byProp.get(pr.id) || []).sort((a, b) => ORDER[a.status] - ORDER[b.status] || (a.days_left ?? 1e9) - (b.days_left ?? 1e9));
-    const status = current.length ? current[0].status : isLandLike(pr.kind) ? 'info' : 'none';
+    const status = propStatus(pr, current);
     return { ...pr, status, policies: current, next: current[0] || null };
   }).sort((a, b) => ORDER[a.status] - ORDER[b.status]
     || (a.next && b.next ? (a.next.days_left ?? 1e9) - (b.next.days_left ?? 1e9) : 0)
@@ -127,8 +149,8 @@ function listProperties() {
 }
 
 function summary() {
-  const c = { expired: 0, due30: 0, due90: 0, nodate: 0, active: 0, none: 0, info: 0 };
-  for (const p of listProperties()) c[p.status] += 1;
+  const c = { expired: 0, due30: 0, due90: 0, nodate: 0, active: 0, none: 0, notreq: 0, sections: {} };
+  for (const p of listProperties()) { c[p.status] += 1; c.sections[p.category || 'other'] = (c.sections[p.category || 'other'] || 0) + 1; }
   return c;
 }
 
@@ -143,9 +165,7 @@ function getProperty(id) {
   const history = db.prepare(`SELECT l.*, u.name AS user_name FROM ins_log l LEFT JOIN users u ON u.id = l.user_id
     WHERE l.property_id = ? ORDER BY l.id DESC LIMIT 100`).all(pr.id);
   const current = all.filter((p) => p.is_current);
-  const status = current.length
-    ? current.slice().sort((a, b) => ORDER[a.status] - ORDER[b.status])[0].status
-    : isLandLike(pr.kind) ? 'info' : 'none';
+  const status = propStatus(pr, current);
   return { ...pr, status, current, past: all.filter((p) => !p.is_current), files, history };
 }
 
@@ -398,7 +418,8 @@ function importWorkbook(buffer, userId) {
   const getOrAddProp = (address, kind, note) => {
     let p = findProp(address);
     if (p) return p;
-    const r = db.prepare('INSERT INTO ins_properties (address, kind, notes, created_at) VALUES (?,?,?,?)').run(cleanText(address, 300), cleanText(kind, 80), cleanText(note, 500), now());
+    const r = db.prepare('INSERT INTO ins_properties (address, kind, category, notes, created_at) VALUES (?,?,?,?,?)')
+      .run(cleanText(address, 300), cleanText(kind, 80), categoryOf(kind, address), cleanText(note, 500), now());
     result.properties_added += 1;
     p = db.prepare('SELECT * FROM ins_properties WHERE id = ?').get(Number(r.lastInsertRowid));
     log(p.id, userId, 'imported', 'Added from Excel');
@@ -477,7 +498,7 @@ const fmtUS = (iso) => (iso ? `${iso.slice(5, 7)}/${iso.slice(8, 10)}/${iso.slic
 // Finds alerts not sent yet, records them, and returns what to tell people.
 function collectAlerts() {
   const rows = db.prepare(`SELECT p.*, pr.address FROM ins_policies p JOIN ins_properties pr ON pr.id = p.property_id
-    WHERE p.is_current = 1 AND p.end_date IS NOT NULL`).all();
+    WHERE p.is_current = 1 AND p.end_date IS NOT NULL AND COALESCE(pr.category, '') != 'land'`).all();
   const fresh = [];
   for (const p of rows) {
     const a = dueAlert(p);
@@ -504,6 +525,6 @@ function collectAlerts() {
 }
 
 module.exports = {
-  INS_DIR, today, daysLeft, policyStatus, listProperties, summary, getProperty, addPolicy, updatePolicy, cleanPolicy,
+  CATEGORIES, categoryOf, INS_DIR, today, daysLeft, policyStatus, listProperties, summary, getProperty, addPolicy, updatePolicy, cleanPolicy,
   saveFile, savePagesTo, normPol, propertyHints, filePath, pdfPagesText, guessFields, analyzeBigPdf, extractPages, parsePageList, importWorkbook, collectAlerts, dueAlert, log, toISODate,
 };

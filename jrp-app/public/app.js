@@ -1729,7 +1729,14 @@ if ('serviceWorker' in navigator) {
 }
 
 // ---------- INSURANCE (admins): JRP's own properties, policies, renewals ----------
-const INS_LABEL = { expired: 'Expired', due30: 'Due soon', due90: 'Coming up', nodate: 'No end date', active: 'Active', none: 'No policy on file', info: 'Land / no policy' };
+const INS_LABEL = { expired: 'Expired', due30: 'Due soon', due90: 'Coming up', nodate: 'No end date', active: 'Active', none: 'No policy on file', notreq: 'Not required' };
+// Property types (= sections). Land needs no insurance.
+const INS_TYPES = [
+  ['gas', '⛽', 'Gas Station', 'Gas Stations'], ['rental', '🏠', 'Rental Property', 'Rental Properties'], ['truck', '🚚', 'Truck Stop', 'Truck Stops'],
+  ['land', '🌾', 'Land (vacant)', 'Not Required'], ['commercial', '🏢', 'Commercial building', 'Commercial'], ['hotel', '🏨', 'Hotel / Motel', 'Hotels'],
+  ['other', '📦', 'Other / Business', 'Other'],
+];
+const insType = (k) => INS_TYPES.find((t) => t[0] === k) || INS_TYPES[INS_TYPES.length - 1];
 const usDate = (iso) => (iso ? `${iso.slice(5, 7)}/${iso.slice(8, 10)}/${iso.slice(0, 4)}` : '—');
 function daysText(p) {
   if (!p || p.days_left === null || p.days_left === undefined) return 'No expiration date on file';
@@ -1738,7 +1745,7 @@ function daysText(p) {
   if (d === 0) return 'Expires TODAY';
   return `${d} day${d === 1 ? '' : 's'} left`;
 }
-const insFilter = { show: 'action', q: '' };
+const insFilter = { show: 'all', section: 'all', q: '' };
 
 async function viewInsurance() {
   const navAt = navToken;
@@ -1748,10 +1755,10 @@ async function viewInsurance() {
   if (navAt !== navToken || !onPage('#/insurance')) return;
   const s = d.summary;
   const chips = [
-    ['action', 'Needs action', s.expired + s.due30 + s.none],
-    ['expired', 'Expired', s.expired], ['due30', 'Due ≤ 30 days', s.due30], ['due90', 'Due ≤ 90 days', s.due90],
-    ['active', 'Active', s.active], ['none', 'No policy', s.none], ['info', 'Land / info', s.info + s.nodate], ['all', 'All', d.properties.length],
+    ['all', 'Any status'], ['action', 'Needs action'], ['expired', 'Expired'], ['due30', 'Due ≤ 30 days'], ['due90', 'Due ≤ 90 days'],
+    ['active', 'Active'], ['none', 'No policy'], ['nodate', 'No end date'],
   ];
+  const secCount = (k) => (k === 'all' ? d.properties.length : (s.sections || {})[k] || 0);
   $app.innerHTML = `
     ${officeTabs('insurance')}
     <p class="kicker">Insurance · today ${esc(usDate(d.today))}</p>
@@ -1769,7 +1776,11 @@ async function viewInsurance() {
     </div>
     <div class="searchbar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
       <input id="ins-q" type="search" placeholder="Address, company or policy #" value="${esc(insFilter.q)}" aria-label="Search insurance"></div>
-    <div class="chips" id="ins-chips">${chips.map(([k, l, n]) => `<button type="button" class="chip ${insFilter.show === k ? 'on' : ''}" data-show="${k}">${l} (${n})</button>`).join('')}</div>
+    <div class="ins-sections" id="ins-sections" role="tablist" aria-label="Sections">
+      ${[['all', '📋', 'All', 'All'], ...INS_TYPES].map(([k, ic, , plural]) => `<button type="button" class="ins-sec ${insFilter.section === k ? 'on' : ''} ${k === 'land' ? 'sec-land' : ''}" data-sec="${k}">
+        <span class="ic" aria-hidden="true">${ic}</span><span>${esc(plural)}</span><b>${secCount(k)}</b></button>`).join('')}
+    </div>
+    <div class="chips" id="ins-chips">${chips.map(([k, l]) => `<button type="button" class="chip ${insFilter.show === k ? 'on' : ''}" data-show="${k}">${l}</button>`).join('')}</div>
     <ul class="ins-list" id="ins-list"></ul>
     ${d.properties.length ? '' : `<div class="card"><h2>Get started</h2><p>Import your insurance Excel sheet to load every property at once, or add properties one by one.</p>
       <a class="btn" href="#/insurance/import">Import Excel</a></div>`}`;
@@ -1777,7 +1788,8 @@ async function viewInsurance() {
     const q = insFilter.q.trim().toLowerCase();
     const list = d.properties.filter((p) => {
       const st = insFilter.show;
-      const ok = st === 'all' || (st === 'action' ? ['expired', 'due30', 'none'].includes(p.status) : st === 'info' ? ['info', 'nodate'].includes(p.status) : p.status === st);
+      const inSection = insFilter.section === 'all' || (p.category || 'other') === insFilter.section;
+      const ok = inSection && (st === 'all' || (st === 'action' ? ['expired', 'due30', 'none'].includes(p.status) : p.status === st));
       const hay = `${p.address} ${p.kind || ''} ${p.policies.map((x) => `${x.carrier || ''} ${x.policy_number || ''}`).join(' ')}`.toLowerCase();
       return ok && (!q || hay.includes(q));
     });
@@ -1786,7 +1798,7 @@ async function viewInsurance() {
       return `<li class="ins-item st-${esc(p.status)}">
         <a class="ins-main" href="#/insurance/${p.id}">
           <span class="ins-status">${esc(INS_LABEL[p.status])}</span>
-          <span class="ins-addr">${esc(p.address)}</span>
+          <span class="ins-addr"><span aria-hidden="true">${insType(p.category)[1]}</span> ${esc(p.address)}</span>
           ${n ? `<span class="ins-exp">Expires <b>${esc(usDate(n.end_date))}</b> · ${esc(daysText(n))}</span>
             <span class="ins-meta">${esc([n.carrier, n.policy_number].filter(Boolean).join(' · '))}${p.policies.length > 1 ? ` · +${p.policies.length - 1} more polic${p.policies.length > 2 ? 'ies' : 'y'}` : ''}</span>`
           : `<span class="ins-meta">${esc(p.kind || '')}${p.notes ? ` · ${esc(p.notes)}` : ''}</span>`}
@@ -1796,10 +1808,22 @@ async function viewInsurance() {
     }).join('') : '<li class="empty">Nothing here.</li>';
   };
   draw();
+  const syncChips = () => {
+    $$('#ins-chips .chip').forEach((c) => c.classList.toggle('on', c.dataset.show === insFilter.show));
+    $$('#ins-sections .ins-sec').forEach((c) => c.classList.toggle('on', c.dataset.sec === insFilter.section));
+    $('#ins-chips').hidden = insFilter.section === 'land'; // land never needs a status filter
+  };
   $$('[data-show]').forEach((b) => b.addEventListener('click', (e) => {
     e.preventDefault(); insFilter.show = b.dataset.show;
-    $$('#ins-chips .chip').forEach((c) => c.classList.toggle('on', c.dataset.show === insFilter.show)); draw();
+    if (b.classList.contains('ins-stat')) insFilter.section = 'all';
+    syncChips(); draw();
   }));
+  $$('[data-sec]').forEach((b) => b.addEventListener('click', () => {
+    insFilter.section = b.dataset.sec;
+    if (insFilter.section === 'land') insFilter.show = 'all';
+    syncChips(); draw();
+  }));
+  syncChips();
   $('#ins-q').addEventListener('input', (e) => { insFilter.q = e.target.value; draw(); });
 }
 
@@ -1832,7 +1856,8 @@ function policyCardHtml(p, isCurrent) {
       <div class="row ins-pol-actions">
         ${p.file_id ? `<a class="btn" href="/api/insurance/files/${p.file_id}" target="_blank" rel="noopener">📄 Open policy PDF${p.file_pages ? ` (${p.file_pages} p.)` : ''}</a>`
           : `<label class="btn ghost file-btn">📎 Attach PDF<input type="file" accept="application/pdf,.pdf" data-attach="${p.id}" hidden></label>`}
-        ${isCurrent ? `<button type="button" class="btn ghost" data-edit-pol="${p.id}">Edit</button>` : ''}
+        ${isCurrent ? `<button type="button" class="btn ghost" data-edit-pol="${p.id}">✏️ Edit</button>` : ''}
+        <button type="button" class="btn ghost" data-del-pol="${p.id}">🗑 Delete</button>
       </div>
       <div id="edit-pol-${p.id}"></div>
     </div>`;
@@ -1849,9 +1874,10 @@ async function viewInsuranceProperty(id) {
     <div class="card ins-head st-${esc(p.status)}">
       <span class="ins-status">${esc(INS_LABEL[p.status])}</span>
       <h1>${esc(p.address)}</h1>
-      <p class="muted">${esc(p.kind || '')}</p>
+      <p class="ins-type">${insType(p.category)[1]} ${esc(insType(p.category)[2])}${p.kind && p.kind !== insType(p.category)[2] ? ` <span class="muted">· ${esc(p.kind)}</span>` : ''}</p>
       ${p.notes ? `<p class="small">${esc(p.notes)}</p>` : ''}
-      <div class="row"><button type="button" class="btn small ghost" id="edit-prop">Edit property</button></div>
+      ${p.category === 'land' ? '<p class="ok-note">🌾 Vacant land: insurance not required. No expiry alerts.</p>' : ''}
+      <div class="grid2 head-actions"><button type="button" class="btn" id="edit-prop">✏️ Edit</button><button type="button" class="btn danger" id="del-prop">🗑 Delete</button></div>
       <div id="edit-prop-box"></div>
     </div>
 
@@ -1862,7 +1888,7 @@ async function viewInsuranceProperty(id) {
       <div id="add-pol-box"></div>
     </div>
 
-    <div class="card renew-card">
+    <div class="card renew-card" ${p.category === 'land' ? 'hidden' : ''}>
       <h2>⬆️ Upload renewed policy</h2>
       <p class="small muted">Choose the new policy PDF. The app reads the company, policy number, dates and premium for you to check, then the old policy moves to history.</p>
       <label class="btn file-btn">Choose PDF<input type="file" id="renew-file" accept="application/pdf,.pdf" hidden></label>
@@ -1880,7 +1906,6 @@ async function viewInsuranceProperty(id) {
     <div class="card">
       <h2>History</h2>
       <ul class="timeline">${p.history.map((h) => `<li><b>${esc(h.user_name || 'System')}</b> · ${esc(fmtDate(h.created_at))}<br><span class="small">${esc(h.action.replace(/_/g, ' '))}${h.detail ? `: ${esc(h.detail)}` : ''}</span></li>`).join('') || '<li class="muted">Nothing yet.</li>'}</ul>
-      <button type="button" class="btn small danger" id="del-prop">Remove this property</button>
     </div>`;
 
   const reload = () => viewInsuranceProperty(id);
@@ -1948,46 +1973,94 @@ async function viewInsuranceProperty(id) {
     const fd = new FormData(); fd.append('file', inp.files[0]);
     try { await api('POST', `/api/insurance/policies/${inp.dataset.attach}/file`, fd); toast('PDF attached'); reload(); } catch (err) { toast(err.message, true); }
   }));
-  // Edit / delete property
+  // Edit: the questions (type first; land = done)
   $('#edit-prop').addEventListener('click', () => {
-    $('#edit-prop-box').innerHTML = `<form id="prop-form">
-      <div class="field"><label for="ip-addr">Address</label><input id="ip-addr" value="${esc(p.address)}" required maxlength="300"></div>
-      <div class="field"><label for="ip-kind">Type (e.g. SFR, Gas station, Land)</label><input id="ip-kind" value="${esc(p.kind || '')}" maxlength="80"></div>
-      <div class="field"><label for="ip-notes">Notes</label><textarea id="ip-notes" maxlength="2000">${esc(p.notes || '')}</textarea></div>
-      <button class="btn" type="submit">Save</button></form>`;
-    $('#prop-form').addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      try { await api('PATCH', `/api/insurance/properties/${id}`, { address: $('#ip-addr').value, kind: $('#ip-kind').value, notes: $('#ip-notes').value }); toast('Saved'); reload(); }
-      catch (err) { toast(err.message, true); }
-    });
+    const box = $('#edit-prop-box');
+    box.innerHTML = insWizardHtml(p, cur[0]);
+    bindInsWizard(box, p, cur[0], () => reload());
+    box.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
+  // Delete any policy (current or past)
+  $$('[data-del-pol]').forEach((b) => b.addEventListener('click', async () => {
+    if (!confirm('Delete this policy record? Its PDF stays under "All PDFs".')) return;
+    try { await api('DELETE', `/api/insurance/policies/${b.dataset.delPol}`); toast('Policy deleted'); reload(); } catch (err) { toast(err.message, true); }
+  }));
   $('#del-prop').addEventListener('click', async () => {
     if (!confirm(`Remove ${p.address} and all its insurance records and PDFs?`)) return;
     try { await api('DELETE', `/api/insurance/properties/${id}`); toast('Removed'); go('#/insurance'); } catch (err) { toast(err.message, true); }
   });
 }
 
+// The edit / add questions: 1) type (Land = done)  2) address  3) policy details.
+function insWizardHtml(p, pol) {
+  const cat = p ? p.category : '';
+  return `<form class="ins-wizard" id="iw-form">
+    <p class="iw-q">1. What type of property is this?</p>
+    <div class="iw-types">${INS_TYPES.map(([k, ic, label]) => `<button type="button" class="iw-type ${cat === k ? 'on' : ''}" data-type="${k}">
+      <span class="ic" aria-hidden="true">${ic}</span><span>${esc(label)}</span></button>`).join('')}</div>
+    <div id="iw-land" ${cat === 'land' ? '' : 'hidden'}><p class="ok-note">🌾 Vacant land doesn't need insurance. It will go to <b>Not Required</b>.</p></div>
+    <div id="iw-rest" ${cat && cat !== 'land' ? '' : 'hidden'}>
+      <div class="field"><label for="iw-addr">2. Address *</label><input id="iw-addr" maxlength="300" value="${esc(p ? p.address : '')}" placeholder="e.g. 123 Main St, Modesto CA"></div>
+      <p class="iw-q">3. ${pol ? 'Current policy' : 'Current policy (leave empty if there is none)'}</p>
+      ${policyFormHtml(pol || {}, { prefix: 'iw' })}
+    </div>
+    <div class="field" id="iw-addr-land" ${cat === 'land' ? '' : 'hidden'}><label for="iw-addr2">Address</label><input id="iw-addr2" maxlength="300" value="${esc(p ? p.address : '')}"></div>
+    <p class="error" id="iw-err"></p>
+    <div class="row"><button class="btn" type="submit" id="iw-save" ${cat ? '' : 'disabled'}>Save</button>${p ? '<button class="btn ghost" type="button" id="iw-cancel">Cancel</button>' : ''}</div>
+  </form>`;
+}
+function bindInsWizard(box, p, pol, done) {
+  let cat = p ? p.category : '';
+  $('#iw-end_date', box).removeAttribute('required');
+  const show = () => {
+    $$('.iw-type', box).forEach((b) => b.classList.toggle('on', b.dataset.type === cat));
+    $('#iw-land', box).hidden = cat !== 'land';
+    $('#iw-addr-land', box).hidden = cat !== 'land';
+    $('#iw-rest', box).hidden = !cat || cat === 'land';
+    $('#iw-save', box).disabled = !cat;
+  };
+  $$('.iw-type', box).forEach((b) => b.addEventListener('click', () => {
+    // keep the typed address when switching between land and the others
+    const a = cat === 'land' ? $('#iw-addr2', box).value : $('#iw-addr', box).value;
+    cat = b.dataset.type;
+    $('#iw-addr', box).value = a; $('#iw-addr2', box).value = a;
+    show();
+    if (cat !== 'land') $('#iw-addr', box).focus();
+  }));
+  const cancel = $('#iw-cancel', box);
+  if (cancel) cancel.addEventListener('click', () => { box.innerHTML = ''; });
+  $('#iw-form', box).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const err = $('#iw-err', box);
+    const address = (cat === 'land' ? $('#iw-addr2', box) : $('#iw-addr', box)).value.trim();
+    if (!address) { err.textContent = 'Please type the address.'; return; }
+    const body = { address, category: cat, kind: insType(cat)[2] };
+    const f = readPolicyForm('iw');
+    const anyPolicy = cat !== 'land' && (f.carrier || f.policy_number || f.end_date || f.premium);
+    if (anyPolicy && !f.end_date) { err.textContent = 'Add the expiration date of the policy.'; $('#iw-end_date', box).focus(); return; }
+    if (anyPolicy && !f.carrier && !f.policy_number) { err.textContent = 'Add the insurance company or the policy number.'; return; }
+    try {
+      let id = p && p.id;
+      if (id) await api('PATCH', `/api/insurance/properties/${id}`, body);
+      else id = (await api('POST', '/api/insurance/properties', body)).id;
+      if (anyPolicy) {
+        if (pol) await api('PATCH', `/api/insurance/policies/${pol.id}`, f);
+        else await api('POST', `/api/insurance/properties/${id}/policies`, f);
+      }
+      toast(cat === 'land' ? 'Saved: moved to Not Required' : 'Saved');
+      done(id);
+    } catch (e2) { err.textContent = e2.message; }
+  });
+  show();
+}
+
 function viewInsuranceNew() {
   setNav('insurance');
-  $app.innerHTML = `<a href="#/insurance" class="back">← All insurance</a>
-    <div class="card"><h1>Add property</h1><form id="np-form">
-      <div class="field"><label for="np-addr">Address *</label><input id="np-addr" required maxlength="300" placeholder="e.g. 123 Main St, Modesto CA"></div>
-      <div class="field"><label for="np-kind">Type (e.g. SFR, Gas station, Land)</label><input id="np-kind" maxlength="80"></div>
-      <p class="muted small">Optional: add its current policy now.</p>
-      ${policyFormHtml({}, { prefix: 'np' })}
-      <p class="error" id="np-err"></p><button class="btn" type="submit">Save</button></form></div>`;
-  $('#np-end_date').removeAttribute('required');
-  $('#np-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    try {
-      const r = await api('POST', '/api/insurance/properties', { address: $('#np-addr').value, kind: $('#np-kind').value });
-      const pol = readPolicyForm('np');
-      if (pol.carrier || pol.policy_number || pol.end_date) {
-        try { await api('POST', `/api/insurance/properties/${r.id}/policies`, pol); } catch (err) { toast(`Property saved, but the policy was not: ${err.message}`, true); }
-      }
-      toast('Saved'); go(`#/insurance/${r.id}`);
-    } catch (err) { $('#np-err').textContent = err.message; }
-  });
+  $app.innerHTML = `${officeTabs('insurance')}<a href="#/insurance" class="back">← All insurance</a>
+    <div class="card"><h1>Add property</h1><div id="np-box"></div></div>`;
+  const box = $('#np-box');
+  box.innerHTML = insWizardHtml(null, null);
+  bindInsWizard(box, null, null, (id) => go(`#/insurance/${id}`));
 }
 
 function viewInsuranceImport() {
