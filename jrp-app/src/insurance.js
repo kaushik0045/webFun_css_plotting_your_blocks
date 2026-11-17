@@ -505,5 +505,5 @@ function collectAlerts() {
 
 module.exports = {
   INS_DIR, today, daysLeft, policyStatus, listProperties, summary, getProperty, addPolicy, updatePolicy, cleanPolicy,
-  saveFile, savePagesTo, normPol, filePath, pdfPagesText, guessFields, analyzeBigPdf, extractPages, parsePageList, importWorkbook, collectAlerts, dueAlert, log, toISODate,
+  saveFile, savePagesTo, normPol, propertyHints, filePath, pdfPagesText, guessFields, analyzeBigPdf, extractPages, parsePageList, importWorkbook, collectAlerts, dueAlert, log, toISODate,
 };

@@ -534,3 +534,35 @@ test('insurance: admins only; renewal moves the old policy to history', async ()
   assert.equal((await admin('POST', `/api/insurance/properties/${p.data.id}/read-pdf`)).status, 400, 'needs a file');
   assert.equal((await staff('GET', '/api/insurance/files/1')).status, 403);
 });
+
+test('invoices: upload, the 3 questions, paid / unpaid, admins only', async () => {
+  const staff = agent();
+  await staff('POST', '/api/login', { email: 'ca@test.com', password: 'ChatPass123' });
+  assert.equal((await staff('GET', '/api/invoices')).status, 403);
+  const prop = (await admin('POST', '/api/insurance/properties', { address: '2 Invoice Ave, Modesto CA' })).data.id;
+  const upload = async (bytes, name) => {
+    const fd = new FormData();
+    fd.append('file', new Blob([bytes]), name);
+    return admin('POST', '/api/invoices/read', fd);
+  };
+  assert.equal((await upload(Buffer.from('<html>no</html>'), 'x.html')).status, 400, 'not a PDF or photo');
+  const up = await upload(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]), 'photo.jpg');
+  assert.equal(up.status, 200);
+  assert.equal((await admin('POST', '/api/invoices', { upload_id: up.data.upload_id, paid: 'yes' })).status, 400, 'property needed');
+  assert.equal((await admin('POST', '/api/invoices', { upload_id: up.data.upload_id, property_id: prop })).status, 400, 'paid? needed');
+  assert.equal((await admin('POST', '/api/invoices', { upload_id: up.data.upload_id, property_id: prop, paid: 'yes' })).status, 400, 'who paid needed');
+  const saved = await admin('POST', '/api/invoices', { upload_id: up.data.upload_id, property_id: prop, paid: 'no', remind_at: '2099-01-01T18:00:00Z', amount: '$99.50' });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.data.status, 'unpaid');
+  assert.equal(saved.data.amount, 99.5);
+  assert.equal((await admin('POST', '/api/invoices', { upload_id: up.data.upload_id, property_id: prop, paid: 'no' })).status, 410, 'one upload = one invoice');
+  let list = (await admin('GET', '/api/invoices')).data;
+  assert.equal(list.counts.unpaid, 1);
+  const paid = await admin('PATCH', `/api/invoices/${saved.data.id}`, { paid: 'yes', paid_by: 'Chat A' });
+  assert.equal(paid.data.status, 'paid');
+  assert.equal(paid.data.remind_at, null, 'paying clears the reminder');
+  list = (await admin('GET', '/api/invoices')).data;
+  assert.equal(list.counts.paid, 1);
+  assert.equal(list.counts.unpaid, 0);
+  assert.equal((await staff('GET', `/api/invoices/${saved.data.id}/file`)).status, 403);
+});

@@ -631,3 +631,30 @@ body { font-size: .97rem; }
 .chips.wrap { flex-wrap: wrap; overflow: visible; margin: 6px 0 0; }
 .chip .x { background: none; border: 0; color: #fff; font-size: .9rem; margin-left: 6px; cursor: pointer; padding: 0 2px; }
 .label { display: block; margin: 10px 0 6px; font: 700 .7rem/1.2 var(--head); letter-spacing: .12em; text-transform: uppercase; color: #fff; }
+
+/* ============================== Office: tabs + invoices ============================== */
+.office-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin: 0 0 16px; border: 2px solid var(--line-2); }
+.office-tabs a { text-align: center; padding: 14px 8px; text-decoration: none; color: #fff; font: 700 .9rem/1 var(--head); letter-spacing: .04em; }
+.office-tabs a.on { background: var(--red); }
+.big-upload { min-height: 64px; font-size: 1rem; }
+.inv-form { margin-top: 14px; }
+.yn { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.yn .btn { min-height: 56px; }
+.inv-extra { margin: 6px 0 14px; }
+.inv-extra summary { cursor: pointer; color: var(--muted); padding: 8px 0; }
+.inv-total { font-size: 1.05rem; margin: 0 0 10px; }
+.inv-list { list-style: none; margin: 0; padding: 0; }
+.inv-item a { display: grid; gap: 3px; padding: 14px; margin-bottom: 10px; text-decoration: none; color: inherit;
+  background: var(--ink); border: 1px solid var(--line); border-left: 6px solid #f97316; }
+.inv-item.paid a { border-left-color: #22c55e; }
+.inv-item.late a { border-left-color: var(--red); }
+.inv-badge { justify-self: start; font: 700 .7rem/1 var(--head); letter-spacing: .1em; text-transform: uppercase; padding: 5px 8px; background: #f97316; color: #111; }
+.paid .inv-badge { background: #16a34a; color: #fff; }
+.late .inv-badge { background: var(--red); color: #fff; }
+.inv-prop { font: 700 1.1rem/1.25 var(--head); color: #fff; }
+.inv-amt { font-size: 1.05rem; color: #fff; }
+.inv-meta { font-size: .88rem; color: var(--muted); }
+.inv-head { border-left: 6px solid #f97316; }
+.inv-head.paid { border-left-color: #22c55e; }
+.inv-head h1 { margin-top: 10px; }
+.inv-big { font: 700 2rem/1.1 var(--head); color: #fff; margin: 4px 0 6px; }

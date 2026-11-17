@@ -350,3 +350,15 @@ test('insurance: alert stage by days left', () => {
   assert.equal(ins.policyStatus({ end_date: plus(80) }), 'due90');
   assert.equal(ins.policyStatus({ end_date: null }), 'nodate');
 });
+
+test('invoices: reads amount, number, due date and company from the text', () => {
+  const { guessInvoice, fileKind } = require('../src/invoices');
+  const g = guessInvoice('Acme Roofing LLC\nINVOICE\nInvoice #: AR-1002\nService at 9 Oak St\nAmount Due: $2,450.75\nDue Date: 12/15/2026');
+  assert.equal(g.vendor, 'Acme Roofing LLC');
+  assert.equal(g.invoice_number, 'AR-1002');
+  assert.equal(g.amount, 2450.75);
+  assert.equal(g.due_date, '2026-12-15');
+  assert.equal(fileKind(Buffer.from('%PDF-1.7 ...')), 'application/pdf');
+  assert.equal(fileKind(Buffer.from([0xff, 0xd8, 0xff, 0xe0])), 'image/jpeg');
+  assert.equal(fileKind(Buffer.from('<html>evil</html>')), null, 'only PDFs and photos are accepted');
+});

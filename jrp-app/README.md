@@ -64,6 +64,16 @@ jrp-app/
 
 ---
 
+## Invoices (admins only, under Office)
+
+- **Office → 🧾 Invoices → Upload an invoice** (PDF, or a photo taken with the phone).
+- The app asks 3 questions: **which property**, **is it paid?**, and **who paid?** (if yes).
+- If it is **not paid**, it offers a **reminder to pay**: a phone notification at that time, plus "Add to my phone's calendar".
+- The amount, invoice #, due date and company are read from PDF invoices automatically (optional, editable).
+- **Unpaid** and **Paid** tabs, with the unpaid total. **Mark as paid** asks who paid. Every change is kept in the history.
+- The home screen shows a banner when invoices are due or overdue.
+- Invoice files live in `data/uploads/invoices` and never go to GitHub.
+
 ## Insurance (admins only)
 
 The **Insurance** tab tracks JRP's own properties and their policies.

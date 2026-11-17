@@ -807,6 +807,7 @@ app.delete('/api/files/:id', requireAuth, requireAdmin, (req, res) => {
 
 // ---------- insurance (admins) ----------
 require('./src/insuranceRoutes')(app, { requireAuth, requireAdmin, fail, push });
+require('./src/invoices')(app, { requireAuth, requireAdmin, fail, push });
 
 // ---------- front end ----------
 app.get('/healthz', (req, res) => res.json({ ok: true }));

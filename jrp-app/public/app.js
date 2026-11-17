@@ -186,6 +186,8 @@ async function route() {
     if (parts[0] === 'chat') return await viewChatList();
     if (parts[0] === 'admin') return await viewAdmin();
     if (parts[0] === 'account') return await viewAccount();
+    if (parts[0] === 'invoices' && parts[1]) return await viewInvoice(parseInt(parts[1], 10), /[?&]cal=1/.test(hash));
+    if (parts[0] === 'invoices') return await viewInvoices();
     if (parts[0] === 'insurance' && parts[1] === 'new') return viewInsuranceNew();
     if (parts[0] === 'insurance' && parts[1] === 'import') return viewInsuranceImport();
     if (parts[0] === 'insurance' && parts[1] === 'split') return await viewInsuranceSplit();
@@ -252,8 +254,9 @@ const searchState = { q: '', type: 'all', agent: '' };
 async function viewSearch() {
   const navAt = navToken;
   setNav('search');
-  const [team, myRem, unread, insSum] = await Promise.all([agents(), api('GET', '/api/reminders'), api('GET', '/api/chat/unread'),
-    me.role === 'admin' ? api('GET', '/api/insurance/summary').catch(() => null) : null]);
+  const [team, myRem, unread, insSum, invSum] = await Promise.all([agents(), api('GET', '/api/reminders'), api('GET', '/api/chat/unread'),
+    me.role === 'admin' ? api('GET', '/api/insurance/summary').catch(() => null) : null,
+    me.role === 'admin' ? api('GET', '/api/invoices/summary').catch(() => null) : null]);
   const insAlert = insSum && (insSum.expired + insSum.due30) ? insSum : null;
   const ann = unread.latest_announcement;
   if (navAt !== navToken || !onPage('#/')) return;
@@ -264,6 +267,12 @@ async function viewSearch() {
     <a class="card ins-banner" href="#/insurance">
       <span class="ab-k">🛡 Insurance needs attention</span>
       <span class="ab-body">${[insAlert.expired && `${insAlert.expired} expired`, insAlert.due30 && `${insAlert.due30} due within 30 days`].filter(Boolean).join(' · ')}</span>
+      <span class="ab-open">Open →</span>
+    </a>` : ''}
+    ${invSum && invSum.due_now ? `
+    <a class="card ins-banner" href="#/invoices">
+      <span class="ab-k">🧾 ${invSum.due_now} invoice${invSum.due_now === 1 ? '' : 's'} due or overdue</span>
+      <span class="ab-body">${invSum.unpaid} unpaid in total</span>
       <span class="ab-open">Open →</span>
     </a>` : ''}
     ${ann ? `
@@ -1744,6 +1753,7 @@ async function viewInsurance() {
     ['active', 'Active', s.active], ['none', 'No policy', s.none], ['info', 'Land / info', s.info + s.nodate], ['all', 'All', d.properties.length],
   ];
   $app.innerHTML = `
+    ${officeTabs('insurance')}
     <p class="kicker">Insurance · today ${esc(usDate(d.today))}</p>
     <h1>Property insurance</h1>
     <div class="ins-stats">
@@ -2057,6 +2067,263 @@ async function viewInsuranceSplit() {
       });
     };
     draw();
+  });
+}
+
+// ---------- INVOICES (admins): upload, 3 questions, paid / unpaid, pay reminders ----------
+const officeTabs = (active) => `<div class="office-tabs" role="tablist">
+    <a href="#/insurance" role="tab" class="${active === 'insurance' ? 'on' : ''}">🛡 Insurance</a>
+    <a href="#/invoices" role="tab" class="${active === 'invoices' ? 'on' : ''}">🧾 Invoices</a>
+  </div>`;
+const invState = { tab: 'unpaid', q: '' };
+const money2 = (n) => (n === null || n === undefined ? '' : `$${Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+const isoLocal = (date, time) => { const d = date ? new Date(`${date}T${time || '10:00'}`) : null; return d && Number.isFinite(d.getTime()) ? d.toISOString() : null; };
+function defaultPayReminder(due) {
+  const d = new Date(Date.now() + 24 * 3600e3);
+  let date = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  if (due) { // the day before it's due, if that's still ahead
+    const b = new Date(`${due}T10:00`); b.setDate(b.getDate() - 1);
+    if (b.getTime() > Date.now()) date = `${b.getFullYear()}-${pad2(b.getMonth() + 1)}-${pad2(b.getDate())}`;
+  }
+  return { date, time: '10:00' };
+}
+function payerOptions(team, selected = '') {
+  const names = [...new Set([...team.map((u) => u.name), 'Company account'])];
+  return `<option value="">Choose…</option>${names.map((n) => `<option ${n === selected ? 'selected' : ''}>${esc(n)}</option>`).join('')}
+    <option value="__other" ${selected && !names.includes(selected) ? 'selected' : ''}>Someone else…</option>`;
+}
+const payerValue = (sel, other) => (sel.value === '__other' ? other.value.trim() : sel.value);
+
+async function viewInvoices() {
+  const navAt = navToken;
+  setNav('insurance');
+  if (me.role !== 'admin') { $app.innerHTML = '<div class="empty">Invoices are for admins only.</div>'; return; }
+  const [d, props, team] = await Promise.all([api('GET', '/api/invoices'), api('GET', '/api/insurance'), agents()]);
+  if (navAt !== navToken || !onPage('#/invoices')) return;
+  const properties = props.properties.slice().sort((a, b) => a.address.localeCompare(b.address));
+  $app.innerHTML = `
+    ${officeTabs('invoices')}
+    <h1>Invoices</h1>
+    <div class="card upload-inv">
+      <label class="btn block file-btn big-upload">⬆️ Upload an invoice<input type="file" id="inv-file" accept="application/pdf,.pdf,image/*" hidden></label>
+      <p class="muted small" style="margin:8px 0 0">PDF or a photo. On a phone you can take a picture of a paper invoice.</p>
+      <div id="inv-new"></div>
+    </div>
+    <div class="inv-tabs chips" id="inv-tabs">
+      <button type="button" class="chip ${invState.tab === 'unpaid' ? 'on' : ''}" data-tab="unpaid">Unpaid (${d.counts.unpaid})</button>
+      <button type="button" class="chip ${invState.tab === 'paid' ? 'on' : ''}" data-tab="paid">Paid (${d.counts.paid})</button>
+      <button type="button" class="chip ${invState.tab === 'all' ? 'on' : ''}" data-tab="all">All</button>
+    </div>
+    ${d.counts.unpaid ? `<p class="inv-total">Unpaid total: <b>${esc(money2(d.counts.unpaid_total))}</b></p>` : ''}
+    <div class="searchbar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="inv-q" type="search" placeholder="Property, company or invoice #" value="${esc(invState.q)}" aria-label="Search invoices"></div>
+    <ul class="inv-list" id="inv-list"></ul>`;
+  const draw = () => {
+    const q = invState.q.trim().toLowerCase();
+    const today = new Date().toISOString().slice(0, 10);
+    const list = d.invoices.filter((i) => (invState.tab === 'all' || i.status === invState.tab)
+      && (!q || `${i.property || ''} ${i.vendor || ''} ${i.invoice_number || ''} ${i.paid_by || ''}`.toLowerCase().includes(q)));
+    $('#inv-list').innerHTML = list.length ? list.map((i) => {
+      const late = i.status === 'unpaid' && i.due_date && i.due_date < today;
+      return `<li class="inv-item ${i.status} ${late ? 'late' : ''}"><a href="#/invoices/${i.id}">
+        <span class="inv-badge">${i.status === 'paid' ? '✓ Paid' : late ? 'Overdue' : 'Unpaid'}</span>
+        <span class="inv-prop">${esc(i.property || 'No property')}</span>
+        <span class="inv-amt">${esc(money2(i.amount) || 'Amount not entered')}${i.vendor ? ` · ${esc(i.vendor)}` : ''}</span>
+        <span class="inv-meta">${i.status === 'paid' ? `Paid by ${esc(i.paid_by || '?')}${i.paid_on ? ` on ${esc(usDate(i.paid_on))}` : ''}`
+          : `${i.due_date ? `Due ${esc(usDate(i.due_date))}` : 'No due date'}${i.remind_at && !i.remind_sent ? ` · ⏰ ${esc(fmtWhen(i.remind_at))}` : ''}`}</span>
+      </a></li>`;
+    }).join('') : `<li class="empty">${invState.tab === 'unpaid' ? 'No unpaid invoices. 🎉' : 'Nothing here yet.'}</li>`;
+  };
+  draw();
+  $$('#inv-tabs .chip').forEach((b) => b.addEventListener('click', () => {
+    invState.tab = b.dataset.tab; $$('#inv-tabs .chip').forEach((c) => c.classList.toggle('on', c === b)); draw();
+  }));
+  $('#inv-q').addEventListener('input', (e) => { invState.q = e.target.value; draw(); });
+
+  // Upload -> read -> 3 questions
+  $('#inv-file').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const box = $('#inv-new');
+    box.innerHTML = '<p class="muted">Reading the invoice…</p>';
+    const fd = new FormData(); fd.append('file', file);
+    let r;
+    try { r = await api('POST', '/api/invoices/read', fd); } catch (err) { box.innerHTML = `<p class="error">${esc(err.message)}</p>`; return; }
+    const g = r.guess || {};
+    const rem = defaultPayReminder(g.due_date);
+    box.innerHTML = `<form id="inv-form" class="inv-form">
+      <p class="ok-note">✓ ${esc(file.name)}</p>
+      <div class="field q-lead"><label for="inv-prop">1. Which property is this invoice for?</label>
+        <select id="inv-prop" required><option value="">Choose a property…</option>
+          ${properties.map((p) => `<option value="${p.id}" ${r.property_id === p.id ? 'selected' : ''}>${esc(p.address)}</option>`).join('')}
+          <option value="__new">+ A property not in the list…</option></select>
+        <input id="inv-newprop" placeholder="Type the address" maxlength="300" hidden style="margin-top:8px">
+        ${r.property_id ? '<span class="help">Suggested from the invoice. Change it if it is wrong.</span>' : ''}</div>
+      <div class="field"><span class="label">2. Is it paid?</span>
+        <div class="yn"><button type="button" class="btn ghost" data-paid="yes">✓ Yes, paid</button><button type="button" class="btn ghost" data-paid="no">✕ Not paid</button></div></div>
+      <div class="field" id="q-who" hidden><label for="inv-who">3. Who paid?</label>
+        <select id="inv-who">${payerOptions(team)}</select>
+        <input id="inv-who-other" placeholder="Name" maxlength="200" hidden style="margin-top:8px">
+        <label for="inv-paid-on" style="margin-top:12px">Date paid</label><input id="inv-paid-on" type="date" value="${new Date().toISOString().slice(0, 10)}"></div>
+      <div class="field reminder-box" id="q-remind" hidden>
+        <p class="rb-q">⏰ Set a reminder to pay it?</p>
+        <div class="yn"><button type="button" class="btn ghost" data-rem="yes">Yes, remind me</button><button type="button" class="btn ghost" data-rem="no">No thanks</button></div>
+        <div id="rem-when" hidden class="grid2" style="margin-top:12px">
+          <div class="field"><label for="inv-rdate">Date</label><input id="inv-rdate" type="date" value="${rem.date}"></div>
+          <div class="field"><label for="inv-rtime">Time</label><input id="inv-rtime" type="time" value="${rem.time}"></div>
+        </div></div>
+      <details class="inv-extra" ${g.amount || g.due_date ? 'open' : ''}><summary>Details from the invoice (optional)</summary>
+        <div class="grid2">
+          <div class="field"><label for="inv-amount">Amount</label><input id="inv-amount" inputmode="decimal" value="${esc(g.amount ?? '')}"></div>
+          <div class="field"><label for="inv-due">Due date</label><input id="inv-due" type="date" value="${esc(g.due_date || '')}"></div>
+        </div>
+        <div class="grid2">
+          <div class="field"><label for="inv-vendor">From (company)</label><input id="inv-vendor" maxlength="200" value="${esc(g.vendor || '')}"></div>
+          <div class="field"><label for="inv-num">Invoice #</label><input id="inv-num" maxlength="60" value="${esc(g.invoice_number || '')}"></div>
+        </div></details>
+      <p class="error" id="inv-err"></p>
+      <button class="btn block" type="submit">Save invoice</button>
+    </form>`;
+    let paid = ''; let remind = false;
+    const propSel = $('#inv-prop');
+    propSel.addEventListener('change', () => { $('#inv-newprop').hidden = propSel.value !== '__new'; if (propSel.value === '__new') $('#inv-newprop').focus(); });
+    $('#inv-who').addEventListener('change', () => { $('#inv-who-other').hidden = $('#inv-who').value !== '__other'; });
+    $$('[data-paid]').forEach((b) => b.addEventListener('click', () => {
+      paid = b.dataset.paid;
+      $$('[data-paid]').forEach((x) => { x.classList.toggle('ghost', x !== b); });
+      $('#q-who').hidden = paid !== 'yes';
+      $('#q-remind').hidden = paid !== 'no';
+      if (paid === 'yes') $('#inv-who').focus();
+    }));
+    $$('[data-rem]').forEach((b) => b.addEventListener('click', () => {
+      remind = b.dataset.rem === 'yes';
+      $$('[data-rem]').forEach((x) => { x.classList.toggle('ghost', x !== b); });
+      $('#rem-when').hidden = !remind;
+    }));
+    $('#inv-form').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const err = $('#inv-err');
+      const body = {
+        upload_id: r.upload_id,
+        property_id: propSel.value && propSel.value !== '__new' ? Number(propSel.value) : null,
+        new_property: propSel.value === '__new' ? $('#inv-newprop').value : '',
+        paid, paid_by: paid === 'yes' ? payerValue($('#inv-who'), $('#inv-who-other')) : '', paid_on: $('#inv-paid-on').value,
+        remind_at: paid === 'no' && remind ? isoLocal($('#inv-rdate').value, $('#inv-rtime').value) : null,
+        amount: $('#inv-amount').value, due_date: $('#inv-due').value, vendor: $('#inv-vendor').value, invoice_number: $('#inv-num').value,
+      };
+      if (!body.property_id && !body.new_property.trim()) { err.textContent = 'Choose which property this invoice is for.'; propSel.focus(); return; }
+      if (!paid) { err.textContent = 'Is it paid? Tap Yes or Not paid.'; return; }
+      if (paid === 'yes' && !body.paid_by) { err.textContent = 'Who paid it?'; $('#inv-who').focus(); return; }
+      try {
+        const saved = await api('POST', '/api/invoices', body);
+        toast('Invoice saved');
+        invState.tab = saved.status;
+        go(`#/invoices/${saved.id}${saved.remind_at ? '?cal=1' : ''}`);
+      } catch (e2) { err.textContent = e2.message; }
+    });
+  });
+}
+
+async function viewInvoice(id, showCal) {
+  const navAt = navToken;
+  setNav('insurance');
+  const [i, props, team] = await Promise.all([api('GET', `/api/invoices/${id}`), api('GET', '/api/insurance'), agents()]);
+  if (navAt !== navToken || !location.hash.startsWith(`#/invoices/${id}`)) return;
+  const properties = props.properties.slice().sort((a, b) => a.address.localeCompare(b.address));
+  const isPdf = i.mime === 'application/pdf';
+  const calUrl = `/api/invoices/${i.id}/calendar.ics?k=${encodeURIComponent(i.cal_key || '')}`;
+  $app.innerHTML = `
+    ${officeTabs('invoices')}
+    <a href="#/invoices" class="back">← All invoices</a>
+    <div class="card inv-head ${i.status}">
+      <span class="inv-badge">${i.status === 'paid' ? '✓ Paid' : 'Unpaid'}</span>
+      <h1>${esc(i.property || 'No property')}</h1>
+      <p class="inv-big">${esc(money2(i.amount) || 'Amount not entered')}</p>
+      <p class="muted">${esc([i.vendor, i.invoice_number ? `Invoice # ${i.invoice_number}` : '', i.due_date ? `Due ${usDate(i.due_date)}` : ''].filter(Boolean).join(' · '))}</p>
+      ${i.status === 'paid' ? `<p class="ok-note">Paid by ${esc(i.paid_by)}${i.paid_on ? ` on ${esc(usDate(i.paid_on))}` : ''}</p>` : ''}
+      <a class="btn block" href="/api/invoices/${i.id}/file" target="_blank" rel="noopener">${isPdf ? '📄 Open invoice PDF' : '🖼 Open invoice photo'}</a>
+    </div>
+
+    ${i.status === 'unpaid' ? `
+    <div class="card">
+      <h2>Mark as paid</h2>
+      <form id="pay-form">
+        <div class="field"><label for="pay-who">Who paid?</label><select id="pay-who">${payerOptions(team)}</select>
+          <input id="pay-who-other" placeholder="Name" maxlength="200" hidden style="margin-top:8px"></div>
+        <div class="field"><label for="pay-on">Date paid</label><input id="pay-on" type="date" value="${new Date().toISOString().slice(0, 10)}"></div>
+        <p class="error" id="pay-err"></p>
+        <button class="btn block" type="submit">✓ Mark as paid</button>
+      </form>
+    </div>
+    <div class="card reminder-box">
+      <p class="rb-q">⏰ Pay reminder</p>
+      ${i.remind_at ? `<p>${i.remind_sent ? 'Sent' : 'Set for'} <b>${esc(fmtWhen(i.remind_at))}</b>${i.remind_user_name ? ` (${esc(i.remind_user_name)})` : ''}</p>
+        ${!i.remind_sent ? `<a class="btn block ${showCal ? '' : 'ghost'}" href="${calUrl}">📅 Add to my phone's calendar</a>` : ''}` : '<p class="muted">No reminder set.</p>'}
+      <form id="rem-form" class="grid2" style="margin-top:12px">
+        <div class="field"><label for="r-date">Date</label><input id="r-date" type="date" value="${defaultPayReminder(i.due_date).date}"></div>
+        <div class="field"><label for="r-time">Time</label><input id="r-time" type="time" value="10:00"></div>
+        <button class="btn small" type="submit">${i.remind_at ? 'Change reminder' : 'Set reminder'}</button>
+        ${i.remind_at ? '<button class="btn small ghost" type="button" id="rem-clear">Remove reminder</button>' : ''}
+      </form>
+    </div>` : `
+    <div class="card"><button type="button" class="btn ghost" id="mark-unpaid">Mark as NOT paid</button></div>`}
+
+    <div class="card">
+      <h2>Details</h2>
+      <form id="det-form">
+        <div class="field"><label for="d-prop">Property</label><select id="d-prop">${properties.map((p) => `<option value="${p.id}" ${p.id === i.property_id ? 'selected' : ''}>${esc(p.address)}</option>`).join('')}</select></div>
+        <div class="grid2">
+          <div class="field"><label for="d-amount">Amount</label><input id="d-amount" inputmode="decimal" value="${esc(i.amount ?? '')}"></div>
+          <div class="field"><label for="d-due">Due date</label><input id="d-due" type="date" value="${esc(i.due_date || '')}"></div>
+        </div>
+        <div class="grid2">
+          <div class="field"><label for="d-vendor">From (company)</label><input id="d-vendor" value="${esc(i.vendor || '')}" maxlength="200"></div>
+          <div class="field"><label for="d-num">Invoice #</label><input id="d-num" value="${esc(i.invoice_number || '')}" maxlength="60"></div>
+        </div>
+        <div class="field"><label for="d-notes">Notes</label><textarea id="d-notes" maxlength="2000">${esc(i.notes || '')}</textarea></div>
+        <button class="btn small" type="submit">Save details</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>History</h2>
+      <ul class="timeline">${i.history.map((h) => `<li><b>${esc(h.user_name || 'System')}</b> · ${esc(fmtDate(h.created_at))}<br><span class="small">${esc(h.action.replace(/_/g, ' '))}${h.detail ? `: ${esc(h.detail)}` : ''}</span></li>`).join('')}</ul>
+      <p class="muted small">Uploaded by ${esc(i.uploaded_by_name || '?')} · ${esc(i.original_name)}</p>
+      <button type="button" class="btn small danger" id="inv-del">Delete invoice</button>
+    </div>`;
+
+  const reload = () => viewInvoice(id, false);
+  const pf = $('#pay-form');
+  if (pf) {
+    $('#pay-who').addEventListener('change', () => { $('#pay-who-other').hidden = $('#pay-who').value !== '__other'; });
+    pf.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const who = payerValue($('#pay-who'), $('#pay-who-other'));
+      if (!who) { $('#pay-err').textContent = 'Who paid it?'; return; }
+      try { await api('PATCH', `/api/invoices/${id}`, { paid: 'yes', paid_by: who, paid_on: $('#pay-on').value }); toast('Marked as paid'); reload(); }
+      catch (err) { $('#pay-err').textContent = err.message; }
+    });
+    $('#rem-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try { await api('PATCH', `/api/invoices/${id}`, { remind_at: isoLocal($('#r-date').value, $('#r-time').value) }); toast('Reminder set'); viewInvoice(id, true); }
+      catch (err) { toast(err.message, true); }
+    });
+    const rc = $('#rem-clear');
+    if (rc) rc.addEventListener('click', async () => { await api('PATCH', `/api/invoices/${id}`, { remind_at: null }); toast('Reminder removed'); reload(); });
+  }
+  const mu = $('#mark-unpaid');
+  if (mu) mu.addEventListener('click', async () => { await api('PATCH', `/api/invoices/${id}`, { paid: 'no' }); toast('Marked as not paid'); reload(); });
+  $('#det-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await api('PATCH', `/api/invoices/${id}`, { property_id: Number($('#d-prop').value), amount: $('#d-amount').value, due_date: $('#d-due').value,
+        vendor: $('#d-vendor').value, invoice_number: $('#d-num').value, notes: $('#d-notes').value });
+      toast('Saved'); reload();
+    } catch (err) { toast(err.message, true); }
+  });
+  $('#inv-del').addEventListener('click', async () => {
+    if (!confirm('Delete this invoice and its file?')) return;
+    try { await api('DELETE', `/api/invoices/${id}`); toast('Deleted'); go('#/invoices'); } catch (err) { toast(err.message, true); }
   });
 }
 
