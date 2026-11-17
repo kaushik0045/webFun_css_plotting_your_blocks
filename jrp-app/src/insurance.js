@@ -302,8 +302,8 @@ function propertyHints() {
     const byNum = [...new Set(byNumber.filter((x) => flat.includes(x.key)).map((x) => x.id))];
     const byAddr = byAddress.filter((x) => x.re.test(text)).map((x) => x.id);
     if (byNum.length) {
-      const narrowed = byNum.filter((id) => byAddr.includes(id));
-      return { ids: byNum, by: 'policy number', address_ids: narrowed };
+      const keys = [...new Set(byNumber.filter((x) => flat.includes(x.key)).map((x) => x.key))];
+      return { ids: byNum, by: 'policy number', keys };
     }
     return byAddr.length ? { ids: [...new Set(byAddr)], by: 'address', address_ids: byAddr } : null;
   };
@@ -316,7 +316,7 @@ async function analyzeBigPdf(buffer) {
   const perPage = pages.map((txt, i) => {
     const h = hint(txt);
     return {
-      page: i + 1, property_ids: h ? h.ids : [], by: h ? h.by : null,
+      page: i + 1, property_ids: h ? h.ids : [], by: h ? h.by : null, keys: h && h.keys ? h.keys : [],
       // A declarations page names the policy period ("Policy Period: From 05-10-2026 To 05-10-2027").
       dec: /policy\s+period|policy\s+term|effective\s+date[\s\S]{0,80}expiration\s+date/i.test(txt), chars: txt.trim().length, snippet: txt.replace(/\s+/g, ' ').trim().slice(0, 140),
     };
@@ -330,7 +330,9 @@ async function analyzeBigPdf(buffer) {
     groups.push({ from: p.page, to: p.page, property_ids: p.property_ids });
   }
   for (const g of groups) {
-    g.dec_pages = perPage.filter((p) => p.page >= g.from && p.page <= g.to && p.dec).map((p) => p.page);
+    const inG = perPage.filter((p) => p.page >= g.from && p.page <= g.to);
+    g.dec_pages = inG.filter((p) => p.dec).map((p) => p.page);
+    g.keys = [...new Set(inG.flatMap((p) => p.keys))];
   }
   return { total, scanned: pages.every((t) => t.trim().length < 20), pages: perPage, groups };
 }
@@ -347,6 +349,23 @@ async function extractPages(buffer, pageNumbers) {
   copied.forEach((p) => out.addPage(p));
   return { buffer: Buffer.from(await out.save()), pages: list.length };
 }
+// Save already-cut pages to a property and attach them to the right current policy
+// (the one whose policy number is on those pages, else the one still missing a PDF).
+// The same file name on the same property is not saved twice.
+// isDeclarations: only declarations pages replace a policy's existing one-click PDF.
+function savePagesTo(propertyId, pdfBuffer, fileName, pageCount, userId, keys = [], note = '', isDeclarations = true) {
+  const dup = db.prepare('SELECT id FROM ins_files WHERE property_id = ? AND original_name = ?').get(propertyId, fileName);
+  if (dup) return { file_id: dup.id, duplicate: true };
+  const fileId = saveFile(pdfBuffer, fileName, userId, propertyId, pageCount);
+  const cur = db.prepare('SELECT * FROM ins_policies WHERE property_id = ? AND is_current = 1').all(propertyId);
+  const pick = cur.find((p) => keys.includes(normPol(p.policy_number)))
+    || cur.slice().sort((a, b) => (a.file_id ? 1 : 0) - (b.file_id ? 1 : 0) || (a.end_date || '9999').localeCompare(b.end_date || '9999'))[0];
+  const attach = pick && (!pick.file_id || isDeclarations);
+  if (attach) db.prepare('UPDATE ins_policies SET file_id = ? WHERE id = ?').run(fileId, pick.id);
+  log(propertyId, userId, 'file_uploaded', note || fileName);
+  return { file_id: fileId, policy_id: attach ? pick.id : null };
+}
+
 // "39-49, 51" -> [39..49, 51]
 function parsePageList(s, max) {
   const out = [];
@@ -486,5 +505,5 @@ function collectAlerts() {
 
 module.exports = {
   INS_DIR, today, daysLeft, policyStatus, listProperties, summary, getProperty, addPolicy, updatePolicy, cleanPolicy,
-  saveFile, filePath, pdfPagesText, guessFields, analyzeBigPdf, extractPages, parsePageList, importWorkbook, collectAlerts, dueAlert, log, toISODate,
+  saveFile, savePagesTo, normPol, filePath, pdfPagesText, guessFields, analyzeBigPdf, extractPages, parsePageList, importWorkbook, collectAlerts, dueAlert, log, toISODate,
 };

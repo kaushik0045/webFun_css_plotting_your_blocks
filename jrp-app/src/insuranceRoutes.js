@@ -139,7 +139,7 @@ module.exports = function mount(app, { requireAuth, requireAdmin, fail, push }) 
     try {
       const a = await ins.analyzeBigPdf(req.file.buffer);
       const id = require('crypto').randomUUID();
-      splits.set(id, { buffer: req.file.buffer, name: nameOf(req.file), at: Date.now(), total: a.total });
+      splits.set(id, { buffer: req.file.buffer, name: nameOf(req.file), at: Date.now(), total: a.total, dec: new Set(a.pages.filter((x) => x.dec).map((x) => x.page)) });
       res.json({ split_id: id, name: nameOf(req.file), ...a });
     } catch { fail(res, 400, 'This PDF could not be opened. It may be damaged or password-protected.'); }
   });
@@ -157,14 +157,12 @@ module.exports = function mount(app, { requireAuth, requireAdmin, fail, push }) 
       try { out = await ins.extractPages(s.buffer, list); } catch (e) { return fail(res, 400, e.message || 'Could not split the PDF'); }
       const label = String(g.pages).replace(/\s+/g, '');
       const base = s.name.replace(/\.pdf$/i, '');
+      const keys = (Array.isArray(g.keys) ? g.keys : []).map(ins.normPol);
       for (const pid of ids) {
         if (!db.prepare('SELECT 1 FROM ins_properties WHERE id = ?').get(pid)) continue;
-        const fileId = ins.saveFile(out.buffer, `${base} (pages ${label}).pdf`, req.user.id, pid, out.pages);
-        // Attach to the current policy without a PDF yet (else the soonest-expiring current one).
-        const cur = db.prepare("SELECT * FROM ins_policies WHERE property_id = ? AND is_current = 1 ORDER BY (file_id IS NOT NULL), COALESCE(end_date, '9999')").get(pid);
-        if (cur) db.prepare('UPDATE ins_policies SET file_id = ? WHERE id = ?').run(fileId, cur.id);
-        ins.log(pid, req.user.id, 'file_uploaded', `Pages ${label} of ${s.name}`);
-        saved.push({ property_id: pid, file_id: fileId, pages: label });
+        const isDec = list.some((n) => s.dec.has(n));
+        const r = ins.savePagesTo(pid, out.buffer, `${base} (pages ${label}).pdf`, out.pages, req.user.id, keys, `Pages ${label} of ${s.name}`, isDec);
+        saved.push({ property_id: pid, file_id: r.file_id, pages: label });
       }
     }
     res.json({ saved });

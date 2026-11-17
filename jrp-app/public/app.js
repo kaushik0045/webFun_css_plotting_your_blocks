@@ -2023,7 +2023,7 @@ async function viewInsuranceSplit() {
     const fd = new FormData(); fd.append('file', e.target.files[0]);
     let a;
     try { a = await api('POST', '/api/insurance/split', fd); } catch (err) { out.innerHTML = `<p class="error">${esc(err.message)}</p>`; return; }
-    const groups = a.groups.map((g) => ({ pages: g.dec_pages.length ? pagesLabel(g.dec_pages) : `${g.from}-${g.to}`, all: `${g.from}-${g.to}`, dec: g.dec_pages, ids: g.property_ids.slice() }));
+    const groups = a.groups.map((g) => ({ pages: g.dec_pages.length ? pagesLabel(g.dec_pages) : `${g.from}-${g.to}`, all: `${g.from}-${g.to}`, dec: g.dec_pages, ids: g.property_ids.slice(), keys: g.keys || [] }));
     const draw = () => {
       out.innerHTML = `<p class="ok-note">✓ ${a.total} pages read${a.scanned ? ' (scanned: no text found, so pick the pages by hand)' : ''}.</p>
         ${groups.map((g, i) => `<div class="split-group">
@@ -2046,7 +2046,7 @@ async function viewInsuranceSplit() {
       $$('[data-add]').forEach((s) => s.addEventListener('change', () => { if (s.value) { groups[s.dataset.add].ids.push(Number(s.value)); draw(); } }));
       $('#sp-more').addEventListener('click', () => { groups.push({ pages: '', all: `1-${a.total}`, dec: [], ids: [] }); draw(); });
       $('#sp-save').addEventListener('click', async () => {
-        const send = groups.filter((g) => g.ids.length && g.pages.trim()).map((g) => ({ pages: g.pages, property_ids: g.ids }));
+        const send = groups.filter((g) => g.ids.length && g.pages.trim()).map((g) => ({ pages: g.pages, property_ids: g.ids, keys: g.keys }));
         if (!send.length) { $('#sp-err').textContent = 'Pick at least one property and page range.'; return; }
         try {
           const r = await api('POST', `/api/insurance/split/${a.split_id}/save`, { groups: send });

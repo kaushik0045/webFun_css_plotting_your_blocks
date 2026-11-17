@@ -9,7 +9,8 @@
     "create-admin": "node --disable-warning=ExperimentalWarning scripts/create-admin.js",
     "demo-data": "node --disable-warning=ExperimentalWarning scripts/seed-demo.js",
     "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js",
-    "check": "node --disable-warning=ExperimentalWarning scripts/check.js"
+    "check": "node --disable-warning=ExperimentalWarning scripts/check.js",
+    "load-insurance": "node --disable-warning=ExperimentalWarning scripts/load-insurance.js"
   },
   "license": "UNLICENSED",
   "dependencies": {
