@@ -64,51 +64,6 @@ jrp-app/
 
 ---
 
-## Invoices (admins only, under Office)
-
-- **Office → 🧾 Invoices → Upload an invoice** (PDF, or a photo taken with the phone).
-- The app asks 3 questions: **which property**, **is it paid?**, and **who paid?** (if yes).
-- If it is **not paid**, it offers a **reminder to pay**: a phone notification at that time, plus "Add to my phone's calendar".
-- The amount, invoice #, due date and company are read from PDF invoices automatically (optional, editable).
-- **Unpaid** and **Paid** tabs, with the unpaid total. **Mark as paid** asks who paid. Every change is kept in the history.
-- The home screen shows a banner when invoices are due or overdue.
-- Invoice files live in `data/uploads/invoices` and never go to GitHub.
-
-## Insurance (admins only)
-
-The **Insurance** tab tracks JRP's own properties and their policies.
-
-- **Import Excel:** loads the "Insurances" sheets (plus the vehicles and "Renew" sheets). Safe to run again; nothing is added twice.
-- Each property shows its **address and expiration date** in large type, colored by status: expired, due within 30 days, due within 90 days, active, no policy.
-- **One click** opens the current policy PDF.
-- **Upload renewed policy:** choose the new PDF. The app reads the company, policy number, dates and premium, you check them, and the old policy moves to history. Scanned (image-only) PDFs can't be read automatically, so you type those in.
-- **Split a big PDF:** upload a large policy file. The app finds each property's pages by policy number or address and suggests just the declarations pages. Save, and each property gets its own PDF. One policy can be saved to several properties.
-- **Alerts:** admins get a phone notification 60, 30, 14, 7 and 1 days before a policy expires, on the day, and when it has expired. The home screen also shows a red banner.
-- Insurance files live in the data folder (`data/uploads/insurance`). They are never sent to GitHub.
-
-## Message notifications (like WhatsApp)
-
-Chat messages arrive as phone/computer notifications even when the app is closed.
-
-- Each person taps **Turn on** on the home screen (or **Me → Turn on notifications**) once per device.
-- **iPhone/iPad:** needs iOS 16.4 or newer, and the app must be added to the home screen first (Safari → Share → Add to Home Screen), then opened from that icon.
-- **Android, Windows, Mac:** works in Chrome, Edge, Firefox and Safari.
-- Phones need the live **https://** address; on your own computer, `http://localhost:3000` works for testing.
-- The signing keys are created automatically in the data folder (`vapid.json`). Keep that file with the data: if it's lost, everyone just taps **Turn on** again.
-- Private messages go to the other person; team chat and announcements go to everyone except the sender.
-
-## Team directory and office chat
-
-- **Team directory** (Team tab, admins only): every employee's job title, login email, phone, last login, assigned clients and overdue reminders, with Call / Text / Message buttons. **Passwords are stored one-way scrambled and can never be shown**; use **Reset password** to create a new temporary one (shown once, with a button to text it), which also logs that person out everywhere.
-- **Chat** (inside the app only):
-  - 📢 **Announcements**: admins post, everyone reads; admins see "Seen by X of Y" and who hasn't read it. New announcements also show on everyone's home screen.
-  - 💬 **Team chat**: the whole office.
-  - 👤 **Direct messages**: private between two people (admins cannot read other people's direct messages).
-  - **Send to a colleague** on any client profile shares the client as a tappable card.
-  - New messages appear within a few seconds; the Chat tab shows an unread count.
-
----
-
 ## Part 2: Run it on your own computer
 
 1. Install **Node.js 22.13 or newer** from https://nodejs.org (the LTS version is fine).

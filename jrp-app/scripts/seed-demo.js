@@ -106,21 +106,4 @@ const tx = db.transaction(() => {
 });
 tx();
 
-// Sample office chat
-const dm = (a, b) => `dm:${Math.min(a, b)}-${Math.max(a, b)}`;
-const say = db.prepare('INSERT INTO messages (channel, sender_id, body, client_id, created_at) VALUES (?,?,?,?,?)');
-const clientId = (name) => (db.prepare('SELECT id FROM clients WHERE name = ?').get(name) || {}).id || null;
-const minsAgo = (m) => new Date(Date.now() - m * 60e3).toISOString().replace(/\.\d{3}Z$/, 'Z');
-say.run('announce', admin, 'Welcome to JRP Client Book! From today, please log every call and showing here so the whole team can see the history.', null, minsAgo(60 * 26));
-say.run('announce', admin, 'Team meeting Friday 9am at the office. Bring your top 3 buyer matches.', null, minsAgo(90));
-say.run('team', mike, 'Anyone have a buyer for a duplex in Modesto under $650k?', null, minsAgo(240));
-say.run('team', priya, 'David Nguyen might be interested. He wants 2-4 units.', clientId('David Nguyen'), minsAgo(230));
-say.run('team', mike, 'Perfect, thanks! Calling him now.', null, minsAgo(225));
-say.run(dm(admin, priya), admin, 'Priya, can you follow up with Gurpreet about the Crows Landing station? Great match.', clientId('Gurpreet Dhillon'), minsAgo(45));
-say.run(dm(admin, priya), priya, 'On it. Calling him this afternoon.', null, minsAgo(40));
-say.run(dm(mike, priya), mike, 'Can you cover my 3pm showing on Oak Ave tomorrow?', clientId('Maria Lopez'), minsAgo(20));
-// people have read older messages
-const read = db.prepare('INSERT OR REPLACE INTO chat_reads (user_id, channel, last_read_id) VALUES (?,?,?)');
-read.run(priya, 'announce', 1); read.run(mike, 'announce', 2); read.run(admin, 'team', 5); read.run(priya, 'team', 5);
-
 console.log('Demo data added. Logins (password demo1234): admin@demo.com (admin), priya@demo.com, mike@demo.com, kiran@demo.com (staff)');

@@ -69,93 +69,8 @@ function go(hash) {
 function setNav(active) {
   document.getElementById('topbar').hidden = !me;
   document.getElementById('nav-admin').hidden = !(me && me.role === 'admin');
-  document.getElementById('nav-ins').hidden = !(me && me.role === 'admin');
   $$('.topnav a').forEach((a) => a.classList.toggle('active', a.dataset.nav === active));
 }
-
-// ---------- chat badge: checks for new messages every 15 seconds while the app is open ----------
-let unreadInfo = { total: 0, announce: 0, latest_announcement: null };
-async function refreshUnread() {
-  if (!me || document.visibilityState === 'hidden') return;
-  try {
-    unreadInfo = await api('GET', '/api/chat/unread');
-    const b = document.getElementById('chat-badge');
-    if (b) { b.hidden = !unreadInfo.total; b.textContent = unreadInfo.total > 99 ? '99+' : String(unreadInfo.total); }
-    document.title = unreadInfo.total ? `(${unreadInfo.total}) JRP Client Book` : 'JRP Client Book';
-    maybePopup(unreadInfo);
-  } catch { /* offline or logged out */ }
-}
-setInterval(refreshUnread, 5000);
-document.addEventListener('visibilitychange', refreshUnread);
-
-// ---------- new-message pop-up ----------
-// A big pop-up for every new message, so nobody misses one. "Later" hides it until the next new message.
-const popKey = () => `jrp-pop-seen-${me ? me.id : 0}`;
-function popSeen() { try { return Number(localStorage.getItem(popKey()) || 0); } catch { return popSeenMem; } }
-let popSeenMem = 0;
-function setPopSeen(id) { popSeenMem = id; try { localStorage.setItem(popKey(), String(id)); } catch { /* private mode */ } }
-
-function beep() {
-  try {
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return;
-    beep.ctx = beep.ctx || new Ctx();
-    const ctx = beep.ctx;
-    [0, 0.18].forEach((t, i) => {
-      const o = ctx.createOscillator();
-      const g = ctx.createGain();
-      o.frequency.value = i ? 1046 : 784;
-      g.gain.setValueAtTime(0.0001, ctx.currentTime + t);
-      g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + t + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + t + 0.16);
-      o.connect(g).connect(ctx.destination);
-      o.start(ctx.currentTime + t);
-      o.stop(ctx.currentTime + t + 0.17);
-    });
-  } catch { /* sound not allowed yet */ }
-  try { if (navigator.vibrate) navigator.vibrate([120, 60, 120]); } catch { /* not supported */ }
-}
-
-function closePopup() { const el = document.getElementById('msg-pop'); if (el) el.remove(); }
-
-function maybePopup(info) {
-  const m = info && info.newest;
-  if (!m || m.id <= popSeen()) return;
-  const here = `#/chat/${encodeURIComponent(m.channel)}`;
-  if (location.hash === here && document.visibilityState === 'visible') { setPopSeen(m.id); return; } // already reading it
-  const existing = document.getElementById('msg-pop');
-  if (existing && Number(existing.dataset.id) === m.id) return;
-  closePopup();
-  const isAnn = m.kind === 'announce';
-  const heading = isAnn ? '📢 Announcement' : m.kind === 'team' ? '💬 Team chat' : '💬 New message';
-  const more = info.total - 1;
-  const el = document.createElement('div');
-  el.id = 'msg-pop';
-  el.className = `msg-pop${isAnn ? ' is-ann' : ''}`;
-  el.dataset.id = String(m.id);
-  el.setAttribute('role', 'alertdialog');
-  el.setAttribute('aria-labelledby', 'msg-pop-h');
-  el.innerHTML = `
-    <div class="mp-card">
-      <p class="kicker" id="msg-pop-h">${heading}</p>
-      <p class="mp-from">${esc(m.sender_name || 'Management')}<span> · ${esc(fmtAgo(m.created_at))}</span></p>
-      ${m.body ? `<p class="mp-body">${esc(m.body)}</p>` : ''}
-      ${m.client_id ? `<p class="mp-client">About: <b>${esc(m.client_name || 'a client')}</b></p>` : ''}
-      ${more > 0 ? `<p class="muted small">+ ${more} more unread</p>` : ''}
-      <div class="row">
-        <a class="btn" href="${here}" id="mp-open">${isAnn ? 'Open' : 'Open &amp; reply'}</a>
-        <button type="button" class="btn ghost" id="mp-later">${isAnn ? 'Got it' : 'Later'}</button>
-      </div>
-    </div>`;
-  document.body.appendChild(el);
-  const done = () => { setPopSeen(m.id); closePopup(); };
-  el.querySelector('#mp-open').addEventListener('click', done);
-  el.querySelector('#mp-later').addEventListener('click', done);
-  el.addEventListener('click', (e) => { if (e.target === el) done(); });
-  el.querySelector('#mp-open').focus({ preventScroll: true });
-  beep();
-}
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document.getElementById('msg-pop')) document.getElementById('mp-later').click(); });
 
 // ---------- router ----------
 // Every screen change bumps navToken. A screen that finishes loading after the
@@ -165,7 +80,6 @@ let navToken = 0;
 const onPage = (hash) => (location.hash || '#/') === hash;
 async function route() {
   navToken += 1;
-  if (chatPoll) { clearInterval(chatPoll); chatPoll = null; }
   whyStore.clear();
   const hash = location.hash || '#/';
   if (!me && hash !== '#/login') {
@@ -175,24 +89,14 @@ async function route() {
   window.scrollTo(0, 0);
   try {
     if (parts[0] === 'login') return await viewLogin();
-    refreshUnread();
     if (parts[0] === '' ) return await viewSearch();
-    if (parts[0] === 'new') return await viewClientForm(null);
+    if (parts[0] === 'new') return await viewClientForm(null, ['buyer', 'seller', 'both'].includes(parts[1]) ? parts[1] : 'buyer');
     if (parts[0] === 'client' && parts[1] && parts[2] === 'edit') return await viewClientForm(Number(parts[1]));
     if (parts[0] === 'client' && parts[1]) return await viewClient(Number(parts[1]));
     if (parts[0] === 'property' && parts[1]) return await viewProperty(Number(parts[1]), parts[2] === 'edit');
     if (parts[0] === 'matches') return await viewMatches();
-    if (parts[0] === 'chat' && parts[1]) return await viewThread(decodeURIComponent(parts.slice(1).join('/')));
-    if (parts[0] === 'chat') return await viewChatList();
     if (parts[0] === 'admin') return await viewAdmin();
     if (parts[0] === 'account') return await viewAccount();
-    if (parts[0] === 'invoices' && parts[1]) return await viewInvoice(parseInt(parts[1], 10), /[?&]cal=1/.test(hash));
-    if (parts[0] === 'invoices') return await viewInvoices();
-    if (parts[0] === 'insurance' && parts[1] === 'new') return viewInsuranceNew();
-    if (parts[0] === 'insurance' && parts[1] === 'import') return viewInsuranceImport();
-    if (parts[0] === 'insurance' && parts[1] === 'split') return await viewInsuranceSplit();
-    if (parts[0] === 'insurance' && parts[1]) return await viewInsuranceProperty(Number(parts[1]));
-    if (parts[0] === 'insurance') return await viewInsurance();
     $app.innerHTML = '<div class="empty">Page not found. <a href="#/">Go to search</a></div>';
   } catch (e) {
     setNav('search');
@@ -209,8 +113,8 @@ function viewLogin() {
     <div class="login-wrap">
       <div class="card login-card">
         <div class="emblem" aria-hidden="true"><span><b>J</b>RP</span></div>
-        <img class="logo" src="/img/logo-white.png" alt="JRP Investment Group" width="144" height="28">
-        <p class="kicker">Client Book · Employees only</p>
+        <img class="logo" src="/img/logo-dark.png" alt="JRP Investment Group" width="144" height="28">
+        <p class="kicker">Client Book · for JRP employees</p>
         <p class="muted small">Log in with your work email.</p>
         <form id="login-form" autocomplete="on">
           <div class="field"><label for="email">Email</label>
@@ -240,8 +144,6 @@ function viewLogin() {
     try {
       me = await api('POST', '/api/login', { email: $('#email').value, password: $('#password').value });
       go('#/');
-      setTimeout(refreshUnread, 800);
-      pushSync();
     } catch (err) {
       $('#login-err').textContent = err.message;
     } finally { btn.disabled = false; }
@@ -254,35 +156,15 @@ const searchState = { q: '', type: 'all', agent: '' };
 async function viewSearch() {
   const navAt = navToken;
   setNav('search');
-  const [team, myRem, unread, insSum, invSum] = await Promise.all([agents(), api('GET', '/api/reminders'), api('GET', '/api/chat/unread'),
-    me.role === 'admin' ? api('GET', '/api/insurance/summary').catch(() => null) : null,
-    me.role === 'admin' ? api('GET', '/api/invoices/summary').catch(() => null) : null]);
-  const insAlert = insSum && (insSum.expired + insSum.due30) ? insSum : null;
-  const ann = unread.latest_announcement;
+  const [team, myRem] = await Promise.all([agents(), api('GET', '/api/reminders')]);
   if (navAt !== navToken || !onPage('#/')) return;
   $app.innerHTML = `
-    <p class="kicker">Client Book</p>
-    <h1>Hi, ${esc(me.name.split(' ')[0])}</h1>
-    ${insAlert ? `
-    <a class="card ins-banner" href="#/insurance">
-      <span class="ab-k">🛡 Insurance needs attention</span>
-      <span class="ab-body">${[insAlert.expired && `${insAlert.expired} expired`, insAlert.due30 && `${insAlert.due30} due within 30 days`].filter(Boolean).join(' · ')}</span>
-      <span class="ab-open">Open →</span>
-    </a>` : ''}
-    ${invSum && invSum.due_now ? `
-    <a class="card ins-banner" href="#/invoices">
-      <span class="ab-k">🧾 ${invSum.due_now} invoice${invSum.due_now === 1 ? '' : 's'} due or overdue</span>
-      <span class="ab-body">${invSum.unpaid} unpaid in total</span>
-      <span class="ab-open">Open →</span>
-    </a>` : ''}
-    ${ann ? `
-    <a class="card announce-banner" href="#/chat/announce">
-      <span class="ab-k">📢 New announcement${unread.announce > 1 ? `s (${unread.announce})` : ''}</span>
-      <span class="ab-from">${esc(ann.sender_name || 'Management')} · ${esc(fmtAgo(ann.created_at))}</span>
-      <span class="ab-body">${esc(ann.body)}</span>
-      <span class="ab-open">Open →</span>
-    </a>` : ''}
-    ${pushAskHtml()}
+    <p class="kicker">Hi, ${esc(me.name.split(' ')[0])} 👋</p>
+    <h1>Your clients</h1>
+    <div class="home-actions">
+      <a class="btn" href="#/new/buyer">＋ Add a buyer</a>
+      <a class="btn" href="#/new/seller">＋ Add a seller</a>
+    </div>
     ${myRem.length ? `
     <div class="card my-reminders">
       <h2>My reminders <span class="count">${myRem.length}</span></h2>
@@ -291,7 +173,7 @@ async function viewSearch() {
     </div>` : ''}
     <div class="searchbar">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-      <input id="q" type="search" placeholder="Name, phone or address" autocomplete="off" value="${esc(searchState.q)}" aria-label="Search clients">
+      <input id="q" type="search" placeholder="Find a client: name, phone or address" autocomplete="off" value="${esc(searchState.q)}" aria-label="Search clients">
     </div>
     <div class="filters-row">
       <div class="chips" role="group" aria-label="Buyer or seller">
@@ -308,12 +190,11 @@ async function viewSearch() {
         </select>
       </label>
     </div>
-    <div class="spread small muted" style="margin:4px 0 10px"><span id="count"></span><a class="btn small" href="#/new">+ New buyer / seller</a></div>
+    <p class="small muted" style="margin:4px 0 10px"><span id="count"></span></p>
     <ul class="results" id="results"><li class="empty">Loading…</li></ul>`;
 
   $('#agent-filter').value = searchState.agent;
   let timer;
-  bindPushAsk();
   const input = $('#q');
   input.addEventListener('input', () => {
     searchState.q = input.value;
@@ -361,7 +242,7 @@ async function runSearch() {
       ${lastNoteHtml(r.last_comment, r.last_comment_by, r.last_comment_at)}
     </a>${r.phone ? `
     <div class="result-quick">
-      <a class="btn" href="${esc(telUrl(r.phone))}" aria-label="Call ${esc(r.name)}">📞 Call</a>
+      <a class="btn call" href="${esc(telUrl(r.phone))}" aria-label="Call ${esc(r.name)}">📞 Call</a>
       <a class="btn ghost" href="${esc(smsUrl(r.phone))}" aria-label="Text ${esc(r.name)}">💬 Text</a>
     </div>` : ''}</li>`).join('')
     : `<li class="empty">No matches. <a href="#/new">Add a new buyer or seller</a></li>`;
@@ -452,7 +333,7 @@ function reminderLine(r, { showClient = false } = {}) {
         ${r.note ? `<span class="rem-note">${esc(r.note)}</span>` : ''}
       </div>
       <div class="rem-actions">
-        ${showClient && r.client_phone ? `<a class="btn small" href="${esc(telUrl(r.client_phone))}">📞 Call</a>` : ''}
+        ${showClient && r.client_phone ? `<a class="btn small call" href="${esc(telUrl(r.client_phone))}">📞 Call</a>` : ''}
         ${mine ? `<a class="btn small ghost" href="/api/reminders/${r.id}/calendar.ics?k=${encodeURIComponent(r.cal_key || '')}" title="Add to calendar">📅</a>` : ''}
         ${mine || me.role === 'admin' ? `<button type="button" class="btn small ghost" data-rem-done="${r.id}">Done</button>` : ''}
       </div>
@@ -491,7 +372,7 @@ function renderLog(d, { propTags, placeholder, who }) {
       <section data-panel="comments">
         ${askReminder ? reminderBoxHtml(who, { note: pendingReminder.note }) : ''}
         <form id="comment-form">
-          <label for="comment">What happened? (call, meeting, showing, offer…)</label>
+          <label for="comment">Add a note: what happened? (call, meeting, showing, offer…)</label>
           <textarea id="comment" maxlength="5000" required placeholder="${esc(placeholder)}"></textarea>
           <div class="spread" style="margin-top:8px">
             <span class="muted small">Saved with your name and the current date &amp; time.</span>
@@ -885,18 +766,16 @@ async function viewClient(id) {
         return lastNoteHtml(m.body, m.author, m.created_at, tag);
       })()}
       <div class="quick">
-        ${c.phone ? `<a class="btn" href="${esc(telUrl(c.phone))}">📞 Call</a>` : '<span></span>'}
+        ${c.phone ? `<a class="btn call" href="${esc(telUrl(c.phone))}">📞 Call</a>` : '<span></span>'}
         ${c.phone ? `<a class="btn ghost" href="sms:${esc(c.phone.replace(/[^\d+]/g, ''))}">💬 Text</a>` : '<span></span>'}
         ${c.email ? `<a class="btn ghost" href="mailto:${esc(c.email)}">✉️ Email</a>` : '<span></span>'}
       </div>
       ${c.reminders.length ? `<ul class="rem-list">${c.reminders.map((r) => reminderLine(r)).join('')}</ul>` : ''}
-      <div class="grid2 head-actions">
-        <button type="button" class="btn small ghost" id="add-reminder">⏰ Set a reminder</button>
-        <button type="button" class="btn small ghost" id="share-client">💬 Send to a colleague</button>
-      </div>
+      <button type="button" class="btn ghost block" id="add-reminder">⏰ Remind me to call</button>
       <div id="rem-slot"></div>
-      <div id="share-slot"></div>
     </div>
+
+    ${renderLog(c, { propTags: true, placeholder: 'e.g. Called buyer, interested in 2nd showing on Saturday. Budget firm at $450k.', who })}
 
     ${c.type === 'seller' && (c.properties || []).some((p) => p.details && p.details.exchange_1031 === 'yes') && !dismissed1031(c.id) ? `
     <div class="card prompt-1031" id="prompt-1031">
@@ -955,14 +834,12 @@ async function viewClient(id) {
       </ul>
     </div>
 
-    ${renderLog(c, { propTags: true, placeholder: 'e.g. Called buyer, interested in 2nd showing on Saturday. Budget firm at $450k.', who })}
 
     ${isAdmin ? `<div style="text-align:center;margin:24px 0"><button class="btn danger small" id="del-client">Delete this ${esc(typeLabel[c.type].toLowerCase())} permanently</button></div>` : ''}
   `;
 
   bindLog(`/api/clients/${id}`, () => viewClient(id), who);
   bindReminderDone(() => viewClient(id));
-  $('#share-client').addEventListener('click', () => openShareBox(c));
   $('#add-reminder').addEventListener('click', () => {
     const slot = $('#rem-slot');
     if ($('#reminder-box')) return;
@@ -1133,16 +1010,17 @@ function activityText(a) {
 }
 
 // ---------- new / edit client ----------
-async function viewClientForm(id) {
+async function viewClientForm(id, startType = 'buyer') {
   const navAt = navToken;
   setNav(id ? 'search' : 'new');
-  const c = id ? await api('GET', `/api/clients/${id}`) : { type: 'buyer', assigned_agent_id: me.id, details: {} };
+  const here = location.hash || '#/';
+  const c = id ? await api('GET', `/api/clients/${id}`) : { type: startType, assigned_agent_id: me.id, details: {} };
   const [list, Q] = await Promise.all([agents(), questions()]);
-  if (navAt !== navToken || !onPage(id ? `#/client/${id}/edit` : '#/new')) return;
+  if (navAt !== navToken || !onPage(here)) return;
   $app.innerHTML = `
     <a href="${id ? `#/client/${id}` : '#/'}" class="back">← Cancel</a>
     <div class="card" style="margin-top:8px">
-      <h1>${id ? `Edit ${esc(c.name)}` : 'New buyer / seller'}</h1>
+      <h1>${id ? `Edit ${esc(c.name)}` : c.type === 'seller' ? 'Add a seller' : 'Add a buyer'}</h1>
       <form id="client-form">
         <div class="field"><label>Type</label>
           <div class="chips" id="type-chips">
@@ -1270,7 +1148,6 @@ async function viewAdmin() {
     <p class="muted small">${active} active of ${users.length}. Passwords are stored scrambled and can't be viewed by anyone. Use <b>Reset password</b> to give someone a new one.</p>
     <div class="row" style="margin:10px 0 14px">
       <input id="team-q" type="search" placeholder="Find an employee" aria-label="Find an employee" style="flex:1;min-width:180px">
-      <a class="btn small ghost" href="#/chat/announce">📢 Broadcast to all</a>
     </div>
     <div class="emp-grid" id="emp-grid">
       ${users.map((u) => `
@@ -1290,9 +1167,8 @@ async function viewAdmin() {
             <li><span class="k">Clients</span><span class="v">${u.client_count} assigned${u.overdue_reminders ? ` · <span class="warn">${u.overdue_reminders} overdue reminder${u.overdue_reminders === 1 ? '' : 's'}</span>` : ''}</span></li>
           </ul>
           <div class="quick">
-            ${u.phone ? `<a class="btn small" href="${esc(telUrl(u.phone))}">Call</a>` : '<span class="btn small ghost disabled">No phone</span>'}
+            ${u.phone ? `<a class="btn small call" href="${esc(telUrl(u.phone))}">📞 Call</a>` : '<span class="btn small ghost disabled">No phone</span>'}
             ${u.phone ? `<a class="btn small ghost" href="${esc(smsUrl(u.phone))}">Text</a>` : '<span></span>'}
-            ${u.id !== me.id && u.active ? `<a class="btn small ghost" href="#/chat/${encodeURIComponent(dmChannel(me.id, u.id))}">Message</a>` : '<span></span>'}
           </div>
           <div class="grid2" style="margin-top:8px">
             <button class="btn small ghost" data-edit-user="${u.id}">Edit details</button>
@@ -1319,8 +1195,8 @@ async function viewAdmin() {
       </div>
       ${u ? '' : '<div class="field"><label for="u-email">Work email (their login)</label><input id="u-email" type="email" required maxlength="200"></div>'}
       <div class="field"><label for="u-role">Role</label><select id="u-role">
-        <option value="staff" ${u?.role !== 'admin' ? 'selected' : ''}>Staff: search, add, edit, comment, chat</option>
-        <option value="admin" ${u?.role === 'admin' ? 'selected' : ''}>Admin: also team directory, announcements, delete</option></select></div>
+        <option value="staff" ${u?.role !== 'admin' ? 'selected' : ''}>Staff: find, add, edit and write notes on clients</option>
+        <option value="admin" ${u?.role === 'admin' ? 'selected' : ''}>Admin: also manage the team and delete clients</option></select></div>
       ${u ? `<div class="field"><label for="u-active">Access</label><select id="u-active">
         <option value="1" ${u.active ? 'selected' : ''}>Active (can log in)</option>
         <option value="0" ${u.active ? '' : 'selected'}>Off (blocked right away)</option></select></div>`
@@ -1374,185 +1250,9 @@ async function viewAdmin() {
   $$('[data-reset-user]').forEach((b) => b.addEventListener('click', () => showReset(users.find((u) => u.id === Number(b.dataset.resetUser)))));
 }
 
-// ---------- office chat ----------
-const dmChannel = (a, b) => `dm:${Math.min(a, b)}-${Math.max(a, b)}`;
-let chatPoll = null;
-const chanIcon = (c) => (c.kind === 'announce' ? '<span class="avatar ann" aria-hidden="true">📢</span>'
-  : c.kind === 'team' ? '<span class="avatar team" aria-hidden="true">👥</span>'
-    : avatar(c.other ? c.other.id : 0, c.title));
-function fmtChatTime(iso) {
-  const d = new Date(iso);
-  if (d.toDateString() === new Date().toDateString()) return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
-async function viewChatList() {
-  const navAt = navToken;
-  setNav('chat');
-  const d = await api('GET', '/api/chat');
-  if (navAt !== navToken || !onPage('#/chat')) return;
-  $app.innerHTML = `
-    <p class="kicker">Office chat · inside the app only</p>
-    <h1>Chat</h1>
-    ${me.role === 'admin' ? '<a class="btn small block" href="#/chat/announce" style="margin:6px 0 12px">📢 Send an announcement to everyone</a>' : ''}
-    <input id="chat-q" type="search" placeholder="Find a person" aria-label="Find a person" style="margin-bottom:10px">
-    <ul class="conv-list" id="conv-list">
-      ${d.conversations.map((c) => `
-        <li data-q="${esc(c.title.toLowerCase())}" class="${c.kind === 'dm' && c.other && !c.other.active ? 'off' : ''}">
-          <a class="conv ${c.unread ? 'has-unread' : ''}" href="#/chat/${encodeURIComponent(c.channel)}">
-            ${chanIcon(c)}
-            <span class="conv-main">
-              <span class="conv-top"><b>${esc(c.title)}</b>${c.last ? `<span class="conv-time">${esc(fmtChatTime(c.last.created_at))}</span>` : ''}</span>
-              <span class="conv-last">${c.last
-    ? `${c.last.sender_id === me.id ? 'You: ' : c.kind !== 'dm' ? `${esc((c.last.sender_name || '').split(' ')[0])}: ` : ''}${esc(c.last.body || (c.last.client_name ? `Shared a client: ${c.last.client_name}` : ''))}`
-    : `<span class="muted">${esc(c.subtitle)}</span>`}</span>
-            </span>
-            ${c.unread ? `<span class="unread">${c.unread}</span>` : ''}
-          </a>
-        </li>`).join('')}
-    </ul>`;
-  $('#chat-q').addEventListener('input', (e) => {
-    const q = e.target.value.trim().toLowerCase();
-    $$('#conv-list li').forEach((li) => { li.hidden = q && !li.dataset.q.includes(q); });
-  });
-}
-
-function messageHtml(m, kind, prevMsg) {
-  const mine = m.sender_id === me.id;
-  const day = new Date(m.created_at).toDateString();
-  const sep = !prevMsg || new Date(prevMsg.created_at).toDateString() !== day
-    ? `<li class="day-sep"><span>${esc(day === new Date().toDateString() ? 'Today' : new Date(m.created_at).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }))}</span></li>` : '';
-  const sameAuthor = prevMsg && prevMsg.sender_id === m.sender_id && !sep && (new Date(m.created_at) - new Date(prevMsg.created_at)) < 5 * 60e3;
-  const client = m.client_id ? `<a class="msg-client" href="#/client/${m.client_id}">${badge(m.client_type)} <b>${esc(m.client_name)}</b><span>Open profile →</span></a>` : '';
-  const seen = kind === 'announce' && me.role === 'admin' && m.seen_count !== undefined
-    ? `<button type="button" class="seen" data-seen="${m.id}">Seen by ${m.seen_count} of ${m.audience}</button>` : '';
-  return `${sep}<li class="msg ${mine ? 'mine' : ''} ${kind === 'announce' ? 'ann' : ''} ${sameAuthor ? 'cont' : ''}" data-id="${m.id}">
-      ${!mine && !sameAuthor && kind !== 'dm' ? `<span class="msg-from">${esc(m.sender_name || 'Former employee')}${m.sender_title ? ` · ${esc(m.sender_title)}` : ''}</span>` : ''}
-      <div class="bubble">${m.body ? `<span class="msg-body">${esc(m.body)}</span>` : ''}${client}<span class="msg-time">${esc(new Date(m.created_at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }))}</span></div>
-      ${seen}
-    </li>`;
-}
-
-async function viewThread(channel) {
-  const navAt = navToken;
-  setNav('chat');
-  const hash = `#/chat/${encodeURIComponent(channel)}`;
-  const d = await api('GET', `/api/chat/c/${encodeURIComponent(channel)}`);
-  if (navAt !== navToken || !(onPage(hash) || onPage(`#/chat/${channel}`))) return;
-  const title = d.kind === 'announce' ? 'Announcements' : d.kind === 'team' ? 'Team chat' : d.other.name;
-  const sub = d.kind === 'announce' ? (d.can_post ? 'Everyone in the office receives these' : 'From management. Read only')
-    : d.kind === 'team' ? 'Everyone in the office' : (d.other.title || '') + (d.other.active ? '' : ' · switched off');
-  let msgs = d.messages;
-  $app.innerHTML = `
-    <div class="thread">
-      <div class="thread-head">
-        <a href="#/chat" class="back">← Chat</a>
-        <div class="spread">
-          <div class="row" style="flex-wrap:nowrap">${chanIcon({ kind: d.kind, title, other: d.other })}<div><h1 class="thread-title">${esc(title)}</h1><span class="muted small">${esc(sub)}</span></div></div>
-          ${d.other && d.other.phone ? `<div class="row"><a class="btn small" href="${esc(telUrl(d.other.phone))}">Call</a><a class="btn small ghost" href="${esc(smsUrl(d.other.phone))}">Text</a></div>` : ''}
-        </div>
-      </div>
-      <ul class="msgs" id="msgs">${msgs.length ? msgs.map((m, i) => messageHtml(m, d.kind, msgs[i - 1])).join('') : `<li class="empty">${d.kind === 'dm' ? `Say hi to ${esc(d.other.name.split(' ')[0])} 👋` : 'No messages yet.'}</li>`}</ul>
-      ${d.can_post ? `
-      <form class="composer" id="composer">
-        <textarea id="msg-in" rows="1" maxlength="2000" placeholder="${d.kind === 'announce' ? 'Announcement for everyone…' : 'Message…'}" aria-label="Message"></textarea>
-        <button class="btn" type="submit" aria-label="Send">Send</button>
-      </form>` : '<p class="composer-note">Only admins can post announcements. Message your manager directly if you have a question.</p>'}
-    </div>
-    <dialog id="seen-dlg"><div id="seen-body"></div></dialog>`;
-
-  const list = $('#msgs');
-  const toBottom = () => { list.lastElementChild && list.lastElementChild.scrollIntoView({ block: 'end' }); window.scrollTo(0, document.body.scrollHeight); };
-  toBottom();
-  const lastId = () => (msgs.length ? msgs[msgs.length - 1].id : 0);
-  const append = (newOnes) => {
-    if (!newOnes.length) return;
-    const fresh = newOnes.filter((m) => !msgs.some((x) => x.id === m.id));
-    if (!fresh.length) return;
-    const empty = $('#msgs > .empty'); if (empty) empty.remove();
-    const nearBottom = window.innerHeight + window.scrollY > document.body.scrollHeight - 160;
-    const html = fresh.map((m, i) => messageHtml(m, d.kind, i ? fresh[i - 1] : msgs[msgs.length - 1])).join('');
-    list.insertAdjacentHTML('beforeend', html);
-    msgs = msgs.concat(fresh);
-    if (nearBottom || fresh.some((m) => m.sender_id === me.id)) toBottom();
-  };
-
-  // check for new messages every 4 seconds while this conversation is open
-  chatPoll = setInterval(async () => {
-    if (navAt !== navToken || document.visibilityState === 'hidden') return;
-    try { const r = await api('GET', `/api/chat/c/${encodeURIComponent(channel)}?after=${lastId()}`); append(r.messages); } catch { /* try again later */ }
-  }, 4000);
-
-  list.addEventListener('click', async (e) => {
-    const b = e.target.closest('[data-seen]');
-    if (!b) return;
-    try {
-      const r = await api('GET', `/api/chat/announce/${b.dataset.seen}/seen`);
-      $('#seen-body').innerHTML = `<h2>Who has seen it</h2>
-        <p><b>Seen (${r.seen.length}):</b> ${r.seen.map(esc).join(', ') || '—'}</p>
-        <p><b>Not yet (${r.not_seen.length}):</b> ${r.not_seen.map(esc).join(', ') || '—'}</p>
-        <button class="btn small ghost" id="seen-close">Close</button>`;
-      $('#seen-close').addEventListener('click', () => closeDialog($('#seen-dlg')));
-      openDialog($('#seen-dlg'));
-    } catch (err) { toast(err.message, true); }
-  });
-
-  const form = $('#composer');
-  if (!form) return;
-  const input = $('#msg-in');
-  const grow = () => { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 160)}px`; };
-  input.addEventListener('input', grow);
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey && !('ontouchstart' in window)) { e.preventDefault(); form.requestSubmit(); }
-  });
-  let sending = false;
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const body = input.value.trim();
-    if (!body || sending) return;
-    sending = true;
-    const btn = $('button', form); btn.disabled = true;
-    try {
-      const m = await api('POST', `/api/chat/c/${encodeURIComponent(channel)}`, { body });
-      input.value = ''; grow();
-      append([m]);
-    } catch (err) { toast(err.message, true); }
-    sending = false; btn.disabled = false; input.focus();
-  });
-}
-
-// "Send to a colleague" box on a client's profile: shares the client as a card in chat.
-async function openShareBox(c) {
-  const slot = $('#share-slot');
-  if ($('#share-box')) { $('#share-box').remove(); return; }
-  const team = (await agents()).filter((a) => a.id !== me.id);
-  slot.innerHTML = `
-    <form class="reminder-box" id="share-box">
-      <p class="rb-q">💬 Send <b>${esc(c.name)}</b> to…</p>
-      <div class="field"><label for="share-to">To</label>
-        <select id="share-to">
-          ${team.map((a) => `<option value="${esc(dmChannel(me.id, a.id))}">${esc(a.name)}${a.title ? ` (${esc(a.title)})` : ''}</option>`).join('')}
-          <option value="team">Team chat (everyone)</option>
-          ${me.role === 'admin' ? '<option value="announce">📢 Announcement (everyone)</option>' : ''}
-        </select></div>
-      <div class="field"><label for="share-msg">Message (optional)</label><input id="share-msg" maxlength="2000" placeholder="e.g. Can you call this buyer today?"></div>
-      <div class="row"><button class="btn small" type="submit">Send</button><button type="button" class="btn small ghost" id="share-cancel">Cancel</button></div>
-    </form>`;
-  $('#share-cancel').addEventListener('click', () => $('#share-box').remove());
-  $('#share-box').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const to = $('#share-to').value;
-    try {
-      await api('POST', `/api/chat/c/${encodeURIComponent(to)}`, { body: $('#share-msg').value, client_id: c.id });
-      $('#share-box').innerHTML = `<p class="rb-q">✅ Sent. <a href="#/chat/${encodeURIComponent(to)}">Open the conversation →</a></p>`;
-    } catch (err) { toast(err.message, true); }
-  });
-}
-
 // ---------- my account ----------
 function viewAccount() {
   setNav('account');
-  const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
   $app.innerHTML = `
     <div class="card">
       <h1>${esc(me.name)}</h1>
@@ -1566,13 +1266,6 @@ function viewAccount() {
         ${[['', 'Normal'], ['lg', 'Large'], ['xl', 'Extra large']].map(([v, l]) => `<button type="button" class="chip ${textSize() === v ? 'on' : ''}" data-size="${v}">${l}</button>`).join('')}
       </div>
     </div>
-    <div class="card" id="push-card">${pushCardHtml()}</div>
-    ${standalone ? '' : `
-    <div class="card install-tip">
-      <h2>Put JRP on your phone's home screen</h2>
-      <p><b>iPhone (Safari):</b> tap the Share button, then <b>Add to Home Screen</b>.</p>
-      <p><b>Android (Chrome):</b> tap the ⋮ menu, then <b>Install app</b> or <b>Add to Home screen</b>.</p>
-    </div>`}
     <div class="card">
       <h2>Change password</h2>
       <form id="pw-form">
@@ -1583,11 +1276,9 @@ function viewAccount() {
       </form>
     </div>`;
   $('#logout').addEventListener('click', async () => {
-    await pushForget();
     await api('POST', '/api/logout').catch(() => {});
     go('#/login');
   });
-  bindPushCard();
   $$('#size-chips .chip').forEach((b) => b.addEventListener('click', () => {
     setTextSize(b.dataset.size);
     $$('#size-chips .chip').forEach((x) => x.classList.toggle('on', x === b));
@@ -1601,805 +1292,6 @@ function viewAccount() {
   });
 }
 
-// ---------- notifications (Web Push) ----------
-const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
-const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && window.isSecureContext;
-const pushState = () => {
-  if (!pushSupported()) return isIOS && !isStandalone() ? 'ios-install' : 'unsupported';
-  return Notification.permission; // 'default' | 'granted' | 'denied'
-};
-function keyBytes(b64) {
-  const s = atob((b64 + '='.repeat((4 - (b64.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/'));
-  return Uint8Array.from(s, (c) => c.charCodeAt(0));
-}
-async function pushSubscribe() {
-  const reg = await navigator.serviceWorker.ready;
-  const { publicKey } = await api('GET', '/api/push/key');
-  let sub = await reg.pushManager.getSubscription();
-  if (sub) {
-    // Re-subscribe if the server's key changed (e.g. a new server).
-    const cur = sub.options && sub.options.applicationServerKey ? btoa(String.fromCharCode(...new Uint8Array(sub.options.applicationServerKey))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') : publicKey;
-    if (cur !== publicKey) { await sub.unsubscribe(); sub = null; }
-  }
-  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) });
-  await api('POST', '/api/push/subscribe', { subscription: sub.toJSON() });
-}
-// Must run from a tap (iPhone rule).
-async function enablePush() {
-  const perm = await Notification.requestPermission();
-  if (perm !== 'granted') throw new Error(perm === 'denied' ? 'Notifications are blocked. Turn them on in your phone/browser settings for this app.' : 'Notifications were not turned on.');
-  await pushSubscribe();
-}
-async function pushForget() {
-  try {
-    if (!pushSupported()) return;
-    const reg = await navigator.serviceWorker.getRegistration();
-    const sub = reg && await reg.pushManager.getSubscription();
-    if (sub) await api('POST', '/api/push/unsubscribe', { endpoint: sub.endpoint });
-  } catch { /* offline: fine */ }
-}
-// After login / on start: link this device to whoever is logged in now.
-async function pushSync() {
-  try { if (me && pushState() === 'granted') await pushSubscribe(); } catch { /* try again next time */ }
-}
-
-function pushCardHtml() {
-  const st = pushState();
-  const head = '<h2>🔔 Message notifications</h2>';
-  if (st === 'granted') return `${head}<p>On for this device. New messages show up even when the app is closed.</p>
-    <div class="row"><button class="btn small ghost" id="push-test">Send me a test</button><button class="btn small ghost" id="push-off">Turn off on this device</button></div>`;
-  if (st === 'default') return `${head}<p>Get chat messages on this device even when the app is closed, like WhatsApp.</p>
-    <button class="btn" id="push-on">Turn on notifications</button>`;
-  if (st === 'denied') return `${head}<p><b>Blocked.</b> To turn them on: open your phone or browser <b>Settings → Notifications</b>, find <b>JRP</b> (or this website), and allow notifications. Then come back here.</p>`;
-  if (st === 'ios-install') return `${head}<p>On iPhone, notifications work once the app is on your home screen:</p>
-    <p>1. Tap <b>Share</b> → <b>Add to Home Screen</b>.<br>2. Open JRP from the home screen icon.<br>3. Come back to <b>Me</b> and tap <b>Turn on notifications</b>.</p>`;
-  return `${head}<p class="muted">This browser can't receive notifications. Use Chrome or Safari, or the app installed on your phone's home screen.</p>`;
-}
-function bindPushCard() {
-  const card = $('#push-card');
-  if (!card) return;
-  const rerender = () => { card.innerHTML = pushCardHtml(); bindPushCard(); };
-  const on = $('#push-on');
-  if (on) on.addEventListener('click', async () => {
-    on.disabled = true;
-    try { await enablePush(); toast('Notifications on'); dismissPushAsk(); } catch (err) { toast(err.message, true); }
-    rerender();
-  });
-  const test = $('#push-test');
-  if (test) test.addEventListener('click', async () => {
-    try {
-      await pushSubscribe();
-      const r = await api('POST', '/api/push/test');
-      toast(r.sent ? 'Test sent. Check your notifications.' : 'Could not reach this device. Try turning notifications off and on.', !r.sent);
-    } catch (err) { toast(err.message, true); }
-  });
-  const off = $('#push-off');
-  if (off) off.addEventListener('click', async () => {
-    try {
-      await pushForget();
-      const reg = await navigator.serviceWorker.getRegistration();
-      const sub = reg && await reg.pushManager.getSubscription();
-      if (sub) await sub.unsubscribe();
-      toast('Notifications off on this device');
-    } catch (err) { toast(err.message, true); }
-    card.innerHTML = `<h2>🔔 Message notifications</h2><p>Off on this device.</p><button class="btn" id="push-on">Turn on notifications</button>`;
-    const again = $('#push-on');
-    again.addEventListener('click', async () => {
-      try { await enablePush(); toast('Notifications on'); } catch (err) { toast(err.message, true); }
-      rerender();
-    });
-  });
-}
-
-// Home-screen reminder to turn notifications on (until they say yes or "Not now").
-const pushAskKey = () => `jrp-push-ask-${me ? me.id : 0}`;
-function pushAskDismissed() { try { return localStorage.getItem(pushAskKey()) === '1'; } catch { return false; } }
-function dismissPushAsk() { try { localStorage.setItem(pushAskKey(), '1'); } catch { /* ignore */ } }
-function pushAskHtml() {
-  const st = pushState();
-  if (pushAskDismissed() || (st !== 'default' && st !== 'ios-install')) return '';
-  return `<div class="card push-ask" id="push-ask">
-      <p class="kicker">🔔 Don't miss messages</p>
-      ${st === 'ios-install'
-        ? '<p>Add JRP to your home screen (Share → Add to Home Screen), open it from there, then turn on notifications in <b>Me</b>.</p>'
-        : ''}
-      <div class="row">${st === 'default' ? '<button class="btn small" id="push-ask-on">Turn on</button>' : ''}
-        <button class="btn small ghost" id="push-ask-later">Not now</button></div>
-    </div>`;
-}
-function bindPushAsk() {
-  const box = $('#push-ask');
-  if (!box) return;
-  const on = $('#push-ask-on');
-  if (on) on.addEventListener('click', async () => {
-    on.disabled = true;
-    try { await enablePush(); toast('Notifications on'); dismissPushAsk(); box.remove(); } catch (err) { toast(err.message, true); on.disabled = false; }
-  });
-  $('#push-ask-later').addEventListener('click', () => { dismissPushAsk(); box.remove(); });
-}
-
-// The service worker tells open copies of the app about a new message right away.
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.addEventListener('message', (e) => {
-    if (!e.data) return;
-    if (e.data.type === 'jrp-new-message') refreshUnread();
-    if (e.data.type === 'jrp-open' && e.data.url) location.href = e.data.url;
-  });
-}
-
-// ---------- INSURANCE (admins): JRP's own properties, policies, renewals ----------
-const INS_LABEL = { expired: 'Expired', due30: 'Due soon', due90: 'Coming up', nodate: 'No end date', active: 'Active', none: 'No policy on file', notreq: 'Not required' };
-// Property types (= sections). Land needs no insurance.
-const INS_TYPES = [
-  ['gas', '⛽', 'Gas Station', 'Gas Stations'], ['rental', '🏠', 'Rental Property', 'Rental Properties'], ['truck', '🚚', 'Truck Stop', 'Truck Stops'],
-  ['land', '🌾', 'Land (vacant)', 'Not Required'], ['commercial', '🏢', 'Commercial building', 'Commercial'], ['hotel', '🏨', 'Hotel / Motel', 'Hotels'],
-  ['other', '📦', 'Other / Business', 'Other'],
-];
-const insType = (k) => INS_TYPES.find((t) => t[0] === k) || INS_TYPES[INS_TYPES.length - 1];
-const usDate = (iso) => (iso ? `${iso.slice(5, 7)}/${iso.slice(8, 10)}/${iso.slice(0, 4)}` : '—');
-function daysText(p) {
-  if (!p || p.days_left === null || p.days_left === undefined) return 'No expiration date on file';
-  const d = p.days_left;
-  if (d < 0) return `Expired ${-d} day${d === -1 ? '' : 's'} ago`;
-  if (d === 0) return 'Expires TODAY';
-  return `${d} day${d === 1 ? '' : 's'} left`;
-}
-const insFilter = { show: 'all', section: 'all', q: '' };
-
-async function viewInsurance() {
-  const navAt = navToken;
-  setNav('insurance');
-  if (me.role !== 'admin') { $app.innerHTML = '<div class="empty">Insurance is for admins only.</div>'; return; }
-  const d = await api('GET', '/api/insurance');
-  if (navAt !== navToken || !onPage('#/insurance')) return;
-  const s = d.summary;
-  const chips = [
-    ['all', 'Any status'], ['action', 'Needs action'], ['expired', 'Expired'], ['due30', 'Due ≤ 30 days'], ['due90', 'Due ≤ 90 days'],
-    ['active', 'Active'], ['none', 'No policy'], ['nodate', 'No end date'],
-  ];
-  const secCount = (k) => (k === 'all' ? d.properties.length : (s.sections || {})[k] || 0);
-  $app.innerHTML = `
-    ${officeTabs('insurance')}
-    <p class="kicker">Insurance · today ${esc(usDate(d.today))}</p>
-    <h1>Property insurance</h1>
-    <div class="ins-stats">
-      <a href="#" data-show="expired" class="ins-stat st-expired"><b>${s.expired}</b><span>Expired</span></a>
-      <a href="#" data-show="due30" class="ins-stat st-due30"><b>${s.due30}</b><span>Due in 30 days</span></a>
-      <a href="#" data-show="due90" class="ins-stat st-due90"><b>${s.due90}</b><span>Due in 90 days</span></a>
-      <a href="#" data-show="none" class="ins-stat st-none"><b>${s.none}</b><span>No policy</span></a>
-    </div>
-    <div class="row ins-tools">
-      <a class="btn small" href="#/insurance/new">+ Add property</a>
-      <a class="btn small ghost" href="#/insurance/import">Import Excel</a>
-      <a class="btn small ghost" href="#/insurance/split">Split a big PDF</a>
-    </div>
-    <div class="searchbar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-      <input id="ins-q" type="search" placeholder="Address, company or policy #" value="${esc(insFilter.q)}" aria-label="Search insurance"></div>
-    <div class="ins-sections" id="ins-sections" role="tablist" aria-label="Sections">
-      ${[['all', '📋', 'All', 'All'], ...INS_TYPES].map(([k, ic, , plural]) => `<button type="button" class="ins-sec ${insFilter.section === k ? 'on' : ''} ${k === 'land' ? 'sec-land' : ''}" data-sec="${k}">
-        <span class="ic" aria-hidden="true">${ic}</span><span>${esc(plural)}</span><b>${secCount(k)}</b></button>`).join('')}
-    </div>
-    <div class="chips" id="ins-chips">${chips.map(([k, l]) => `<button type="button" class="chip ${insFilter.show === k ? 'on' : ''}" data-show="${k}">${l}</button>`).join('')}</div>
-    <ul class="ins-list" id="ins-list"></ul>
-    ${d.properties.length ? '' : `<div class="card"><h2>Get started</h2><p>Import your insurance Excel sheet to load every property at once, or add properties one by one.</p>
-      <a class="btn" href="#/insurance/import">Import Excel</a></div>`}`;
-  const draw = () => {
-    const q = insFilter.q.trim().toLowerCase();
-    const list = d.properties.filter((p) => {
-      const st = insFilter.show;
-      const inSection = insFilter.section === 'all' || (p.category || 'other') === insFilter.section;
-      const ok = inSection && (st === 'all' || (st === 'action' ? ['expired', 'due30', 'none'].includes(p.status) : p.status === st));
-      const hay = `${p.address} ${p.kind || ''} ${p.policies.map((x) => `${x.carrier || ''} ${x.policy_number || ''}`).join(' ')}`.toLowerCase();
-      return ok && (!q || hay.includes(q));
-    });
-    $('#ins-list').innerHTML = list.length ? list.map((p) => {
-      const n = p.next;
-      return `<li class="ins-item st-${esc(p.status)}">
-        <a class="ins-main" href="#/insurance/${p.id}">
-          <span class="ins-status">${esc(INS_LABEL[p.status])}</span>
-          <span class="ins-addr"><span aria-hidden="true">${insType(p.category)[1]}</span> ${esc(p.address)}</span>
-          ${n ? `<span class="ins-exp">Expires <b>${esc(usDate(n.end_date))}</b> · ${esc(daysText(n))}</span>
-            <span class="ins-meta">${esc([n.carrier, n.policy_number].filter(Boolean).join(' · '))}${p.policies.length > 1 ? ` · +${p.policies.length - 1} more polic${p.policies.length > 2 ? 'ies' : 'y'}` : ''}</span>`
-          : `<span class="ins-meta">${esc(p.kind || '')}${p.notes ? ` · ${esc(p.notes)}` : ''}</span>`}
-        </a>
-        ${n && n.file_id ? `<a class="btn ghost ins-pdf" href="/api/insurance/files/${n.file_id}" target="_blank" rel="noopener">📄 Policy PDF</a>` : ''}
-      </li>`;
-    }).join('') : '<li class="empty">Nothing here.</li>';
-  };
-  draw();
-  const syncChips = () => {
-    $$('#ins-chips .chip').forEach((c) => c.classList.toggle('on', c.dataset.show === insFilter.show));
-    $$('#ins-sections .ins-sec').forEach((c) => c.classList.toggle('on', c.dataset.sec === insFilter.section));
-    $('#ins-chips').hidden = insFilter.section === 'land'; // land never needs a status filter
-  };
-  $$('[data-show]').forEach((b) => b.addEventListener('click', (e) => {
-    e.preventDefault(); insFilter.show = b.dataset.show;
-    if (b.classList.contains('ins-stat')) insFilter.section = 'all';
-    syncChips(); draw();
-  }));
-  $$('[data-sec]').forEach((b) => b.addEventListener('click', () => {
-    insFilter.section = b.dataset.sec;
-    if (insFilter.section === 'land') insFilter.show = 'all';
-    syncChips(); draw();
-  }));
-  syncChips();
-  $('#ins-q').addEventListener('input', (e) => { insFilter.q = e.target.value; draw(); });
-}
-
-function policyFormHtml(p = {}, { prefix = 'pf', note = '' } = {}) {
-  const f = (k, label, type = 'text', extra = '') => `<div class="field"><label for="${prefix}-${k}">${label}</label>
-    <input id="${prefix}-${k}" type="${type}" value="${esc(p[k] ?? '')}" ${extra}></div>`;
-  return `${note}
-    <div class="grid2">${f('carrier', 'Insurance company *')}${f('policy_number', 'Policy number')}</div>
-    <div class="grid2">${f('start_date', 'Start date', 'date')}${f('end_date', 'Expiration date *', 'date', 'required')}</div>
-    <div class="grid2">${f('premium', 'Premium ($ per year)', 'text', 'inputmode="decimal"')}${f('coverage', 'Coverage (e.g. Building, Workers comp)')}</div>
-    ${f('agent', 'Agent / broker (name, phone)')}
-    <div class="field"><label for="${prefix}-notes">Notes</label><textarea id="${prefix}-notes" maxlength="4000">${esc(p.notes || '')}</textarea></div>`;
-}
-const readPolicyForm = (prefix = 'pf') => Object.fromEntries(['carrier', 'policy_number', 'start_date', 'end_date', 'premium', 'coverage', 'agent', 'notes']
-  .map((k) => [k, ($(`#${prefix}-${k}`) || {}).value || '']));
-
-function policyCardHtml(p, isCurrent) {
-  return `<div class="ins-policy st-${esc(p.status)}">
-      ${isCurrent ? `<p class="ins-big-exp"><span>Expires</span> <b>${esc(usDate(p.end_date))}</b></p>
-        <p class="ins-days">${esc(daysText(p))}</p>` : `<p class="muted small">${esc(usDate(p.start_date))} → ${esc(usDate(p.end_date))}</p>`}
-      <ul class="contact-list">
-        <li><span class="k">Company</span><span class="v">${esc(p.carrier || '—')}</span></li>
-        <li><span class="k">Policy #</span><span class="v">${esc(p.policy_number || '—')}</span></li>
-        ${p.coverage ? `<li><span class="k">Coverage</span><span class="v">${esc(p.coverage)}</span></li>` : ''}
-        <li><span class="k">Term</span><span class="v">${esc(usDate(p.start_date))} → ${esc(usDate(p.end_date))}</span></li>
-        <li><span class="k">Premium</span><span class="v">${p.premium !== null && p.premium !== undefined ? esc(fmtMoney(p.premium)) : '—'}</span></li>
-        ${p.agent ? `<li><span class="k">Agent</span><span class="v">${esc(p.agent)}</span></li>` : ''}
-        ${p.notes ? `<li><span class="k">Notes</span><span class="v" style="white-space:pre-wrap">${esc(p.notes)}</span></li>` : ''}
-      </ul>
-      <div class="row ins-pol-actions">
-        ${p.file_id ? `<a class="btn" href="/api/insurance/files/${p.file_id}" target="_blank" rel="noopener">📄 Open policy PDF${p.file_pages ? ` (${p.file_pages} p.)` : ''}</a>`
-          : `<label class="btn ghost file-btn">📎 Attach PDF<input type="file" accept="application/pdf,.pdf" data-attach="${p.id}" hidden></label>`}
-        ${isCurrent ? `<button type="button" class="btn ghost" data-edit-pol="${p.id}">✏️ Edit</button>` : ''}
-        <button type="button" class="btn ghost" data-del-pol="${p.id}">🗑 Delete</button>
-      </div>
-      <div id="edit-pol-${p.id}"></div>
-    </div>`;
-}
-
-async function viewInsuranceProperty(id) {
-  const navAt = navToken;
-  setNav('insurance');
-  const p = await api('GET', `/api/insurance/properties/${id}`);
-  if (navAt !== navToken || !onPage(`#/insurance/${id}`)) return;
-  const cur = p.current;
-  $app.innerHTML = `
-    <a href="#/insurance" class="back">← All insurance</a>
-    <div class="card ins-head st-${esc(p.status)}">
-      <span class="ins-status">${esc(INS_LABEL[p.status])}</span>
-      <h1>${esc(p.address)}</h1>
-      <p class="ins-type">${insType(p.category)[1]} ${esc(insType(p.category)[2])}${p.kind && p.kind !== insType(p.category)[2] ? ` <span class="muted">· ${esc(p.kind)}</span>` : ''}</p>
-      ${p.notes ? `<p class="small">${esc(p.notes)}</p>` : ''}
-      ${p.category === 'land' ? '<p class="ok-note">🌾 Vacant land: insurance not required. No expiry alerts.</p>' : ''}
-      <div class="grid2 head-actions"><button type="button" class="btn" id="edit-prop">✏️ Edit</button><button type="button" class="btn danger" id="del-prop">🗑 Delete</button></div>
-      <div id="edit-prop-box"></div>
-    </div>
-
-    <div class="card">
-      <h2>Current insurance${cur.length > 1 ? ` (${cur.length} policies)` : ''}</h2>
-      ${cur.length ? cur.map((x) => policyCardHtml(x, true)).join('') : `<p class="muted">No current policy on file.</p>`}
-      <button type="button" class="btn small ghost" id="add-pol">+ Add a policy by hand</button>
-      <div id="add-pol-box"></div>
-    </div>
-
-    <div class="card renew-card" ${p.category === 'land' ? 'hidden' : ''}>
-      <h2>⬆️ Upload renewed policy</h2>
-      <p class="small muted">Choose the new policy PDF. The app reads the company, policy number, dates and premium for you to check, then the old policy moves to history.</p>
-      <label class="btn file-btn">Choose PDF<input type="file" id="renew-file" accept="application/pdf,.pdf" hidden></label>
-      <div id="renew-box"></div>
-    </div>
-
-    ${p.past.length ? `<div class="card"><h2>Past policies (${p.past.length})</h2>${p.past.map((x) => policyCardHtml(x, false)).join('')}</div>` : ''}
-
-    <div class="card">
-      <h2>All PDFs (${p.files.length})</h2>
-      ${p.files.length ? `<ul class="file-list">${p.files.map((f) => `<li><a href="/api/insurance/files/${f.id}" target="_blank" rel="noopener">📄 ${esc(f.original_name)}</a>
-        <span class="muted small">${f.pages ? `${f.pages} pages · ` : ''}${esc(fmtDate(f.created_at))}${f.uploaded_by_name ? ` · ${esc(f.uploaded_by_name)}` : ''}</span></li>`).join('')}</ul>` : '<p class="muted">No PDFs yet.</p>'}
-    </div>
-
-    <div class="card">
-      <h2>History</h2>
-      <ul class="timeline">${p.history.map((h) => `<li><b>${esc(h.user_name || 'System')}</b> · ${esc(fmtDate(h.created_at))}<br><span class="small">${esc(h.action.replace(/_/g, ' '))}${h.detail ? `: ${esc(h.detail)}` : ''}</span></li>`).join('') || '<li class="muted">Nothing yet.</li>'}</ul>
-    </div>`;
-
-  const reload = () => viewInsuranceProperty(id);
-  // Upload renewed policy -> read it -> confirm -> save
-  $('#renew-file').addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const box = $('#renew-box');
-    box.innerHTML = '<p class="muted">Reading the PDF…</p>';
-    const fd = new FormData(); fd.append('file', file);
-    try {
-      const r = await api('POST', `/api/insurance/properties/${id}/read-pdf`, fd);
-      const g = r.guess || {};
-      const replaceable = cur.filter((x) => !g.matched_policy_id || x.id === g.matched_policy_id || cur.length === 1);
-      const note = r.scanned
-        ? '<p class="warn">This PDF is a scanned image, so it could not be read automatically. Please type the details.</p>'
-        : `<p class="ok-note">✓ Read from the PDF${g.end_date ? '' : ' (no dates found, please add them)'}. Check the details, then save.</p>`;
-      box.innerHTML = `<form id="renew-form">${policyFormHtml({ ...g, coverage: (cur[0] || {}).coverage, agent: (cur[0] || {}).agent }, { prefix: 'rn', note })}
-        ${cur.length ? `<div class="field"><span class="label">This renews (moves to history):</span>${cur.map((x) => `
-          <label class="check inline"><input type="checkbox" name="replace" value="${x.id}" ${replaceable.includes(x) ? 'checked' : ''}>
-          <span>${esc([x.carrier, x.policy_number, `exp. ${usDate(x.end_date)}`].filter(Boolean).join(' · '))}</span></label>`).join('')}</div>` : ''}
-        <p class="error" id="rn-err"></p>
-        <div class="row"><button class="btn" type="submit">Save renewal</button><button class="btn ghost" type="button" id="rn-cancel">Cancel</button></div></form>`;
-      $('#rn-cancel').addEventListener('click', () => { box.innerHTML = ''; e.target.value = ''; });
-      $('#renew-form').addEventListener('submit', async (ev) => {
-        ev.preventDefault();
-        try {
-          await api('POST', `/api/insurance/properties/${id}/policies`, {
-            ...readPolicyForm('rn'), file_id: r.file_id, replace: $$('#renew-form input[name=replace]:checked').map((i) => Number(i.value)),
-          });
-          toast('Renewal saved'); reload();
-        } catch (err) { $('#rn-err').textContent = err.message; }
-      });
-    } catch (err) { box.innerHTML = `<p class="error">${esc(err.message)}</p>`; }
-  });
-  // Add by hand
-  $('#add-pol').addEventListener('click', () => {
-    $('#add-pol-box').innerHTML = `<form id="add-form">${policyFormHtml({}, { prefix: 'ap' })}
-      <p class="error" id="ap-err"></p><div class="row"><button class="btn" type="submit">Save policy</button></div></form>`;
-    $('#add-form').addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      try { await api('POST', `/api/insurance/properties/${id}/policies`, readPolicyForm('ap')); toast('Saved'); reload(); }
-      catch (err) { $('#ap-err').textContent = err.message; }
-    });
-  });
-  // Edit a current policy
-  $$('[data-edit-pol]').forEach((b) => b.addEventListener('click', () => {
-    const pol = cur.find((x) => x.id === Number(b.dataset.editPol));
-    const slot = $(`#edit-pol-${pol.id}`);
-    slot.innerHTML = `<form id="ep-form-${pol.id}">${policyFormHtml(pol, { prefix: `ep${pol.id}` })}
-      <p class="error" id="ep-err-${pol.id}"></p>
-      <div class="row"><button class="btn" type="submit">Save</button><button class="btn danger" type="button" id="ep-del-${pol.id}">Delete policy</button></div></form>`;
-    $(`#ep-form-${pol.id}`).addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      try { await api('PATCH', `/api/insurance/policies/${pol.id}`, readPolicyForm(`ep${pol.id}`)); toast('Saved'); reload(); }
-      catch (err) { $(`#ep-err-${pol.id}`).textContent = err.message; }
-    });
-    $(`#ep-del-${pol.id}`).addEventListener('click', async () => {
-      if (!confirm('Delete this policy record? (Its PDF stays in "All PDFs".)')) return;
-      try { await api('DELETE', `/api/insurance/policies/${pol.id}`); toast('Deleted'); reload(); } catch (err) { toast(err.message, true); }
-    });
-  }));
-  // Attach a PDF to a policy that has none
-  $$('[data-attach]').forEach((inp) => inp.addEventListener('change', async () => {
-    const fd = new FormData(); fd.append('file', inp.files[0]);
-    try { await api('POST', `/api/insurance/policies/${inp.dataset.attach}/file`, fd); toast('PDF attached'); reload(); } catch (err) { toast(err.message, true); }
-  }));
-  // Edit: the questions (type first; land = done)
-  $('#edit-prop').addEventListener('click', () => {
-    const box = $('#edit-prop-box');
-    box.innerHTML = insWizardHtml(p, cur[0]);
-    bindInsWizard(box, p, cur[0], () => reload());
-    box.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  });
-  // Delete any policy (current or past)
-  $$('[data-del-pol]').forEach((b) => b.addEventListener('click', async () => {
-    if (!confirm('Delete this policy record? Its PDF stays under "All PDFs".')) return;
-    try { await api('DELETE', `/api/insurance/policies/${b.dataset.delPol}`); toast('Policy deleted'); reload(); } catch (err) { toast(err.message, true); }
-  }));
-  $('#del-prop').addEventListener('click', async () => {
-    if (!confirm(`Remove ${p.address} and all its insurance records and PDFs?`)) return;
-    try { await api('DELETE', `/api/insurance/properties/${id}`); toast('Removed'); go('#/insurance'); } catch (err) { toast(err.message, true); }
-  });
-}
-
-// The edit / add questions: 1) type (Land = done)  2) address  3) policy details.
-function insWizardHtml(p, pol) {
-  const cat = p ? p.category : '';
-  return `<form class="ins-wizard" id="iw-form">
-    <p class="iw-q">1. What type of property is this?</p>
-    <div class="iw-types">${INS_TYPES.map(([k, ic, label]) => `<button type="button" class="iw-type ${cat === k ? 'on' : ''}" data-type="${k}">
-      <span class="ic" aria-hidden="true">${ic}</span><span>${esc(label)}</span></button>`).join('')}</div>
-    <div id="iw-land" ${cat === 'land' ? '' : 'hidden'}><p class="ok-note">🌾 Vacant land doesn't need insurance. It will go to <b>Not Required</b>.</p></div>
-    <div id="iw-rest" ${cat && cat !== 'land' ? '' : 'hidden'}>
-      <div class="field"><label for="iw-addr">2. Address *</label><input id="iw-addr" maxlength="300" value="${esc(p ? p.address : '')}" placeholder="e.g. 123 Main St, Modesto CA"></div>
-      <p class="iw-q">3. ${pol ? 'Current policy' : 'Current policy (leave empty if there is none)'}</p>
-      ${policyFormHtml(pol || {}, { prefix: 'iw' })}
-    </div>
-    <div class="field" id="iw-addr-land" ${cat === 'land' ? '' : 'hidden'}><label for="iw-addr2">Address</label><input id="iw-addr2" maxlength="300" value="${esc(p ? p.address : '')}"></div>
-    <p class="error" id="iw-err"></p>
-    <div class="row"><button class="btn" type="submit" id="iw-save" ${cat ? '' : 'disabled'}>Save</button>${p ? '<button class="btn ghost" type="button" id="iw-cancel">Cancel</button>' : ''}</div>
-  </form>`;
-}
-function bindInsWizard(box, p, pol, done) {
-  let cat = p ? p.category : '';
-  $('#iw-end_date', box).removeAttribute('required');
-  const show = () => {
-    $$('.iw-type', box).forEach((b) => b.classList.toggle('on', b.dataset.type === cat));
-    $('#iw-land', box).hidden = cat !== 'land';
-    $('#iw-addr-land', box).hidden = cat !== 'land';
-    $('#iw-rest', box).hidden = !cat || cat === 'land';
-    $('#iw-save', box).disabled = !cat;
-  };
-  $$('.iw-type', box).forEach((b) => b.addEventListener('click', () => {
-    // keep the typed address when switching between land and the others
-    const a = cat === 'land' ? $('#iw-addr2', box).value : $('#iw-addr', box).value;
-    cat = b.dataset.type;
-    $('#iw-addr', box).value = a; $('#iw-addr2', box).value = a;
-    show();
-    if (cat !== 'land') $('#iw-addr', box).focus();
-  }));
-  const cancel = $('#iw-cancel', box);
-  if (cancel) cancel.addEventListener('click', () => { box.innerHTML = ''; });
-  $('#iw-form', box).addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const err = $('#iw-err', box);
-    const address = (cat === 'land' ? $('#iw-addr2', box) : $('#iw-addr', box)).value.trim();
-    if (!address) { err.textContent = 'Please type the address.'; return; }
-    const body = { address, category: cat, kind: insType(cat)[2] };
-    const f = readPolicyForm('iw');
-    const anyPolicy = cat !== 'land' && (f.carrier || f.policy_number || f.end_date || f.premium);
-    if (anyPolicy && !f.end_date) { err.textContent = 'Add the expiration date of the policy.'; $('#iw-end_date', box).focus(); return; }
-    if (anyPolicy && !f.carrier && !f.policy_number) { err.textContent = 'Add the insurance company or the policy number.'; return; }
-    try {
-      let id = p && p.id;
-      if (id) await api('PATCH', `/api/insurance/properties/${id}`, body);
-      else id = (await api('POST', '/api/insurance/properties', body)).id;
-      if (anyPolicy) {
-        if (pol) await api('PATCH', `/api/insurance/policies/${pol.id}`, f);
-        else await api('POST', `/api/insurance/properties/${id}/policies`, f);
-      }
-      toast(cat === 'land' ? 'Saved: moved to Not Required' : 'Saved');
-      done(id);
-    } catch (e2) { err.textContent = e2.message; }
-  });
-  show();
-}
-
-function viewInsuranceNew() {
-  setNav('insurance');
-  $app.innerHTML = `${officeTabs('insurance')}<a href="#/insurance" class="back">← All insurance</a>
-    <div class="card"><h1>Add property</h1><div id="np-box"></div></div>`;
-  const box = $('#np-box');
-  box.innerHTML = insWizardHtml(null, null);
-  bindInsWizard(box, null, null, (id) => go(`#/insurance/${id}`));
-}
-
-function viewInsuranceImport() {
-  setNav('insurance');
-  $app.innerHTML = `<a href="#/insurance" class="back">← All insurance</a>
-    <div class="card"><h1>Import from Excel</h1>
-      <p>Choose your insurance workbook (.xlsx). The app reads the sheets with "Insurance" in the name (and the vehicles sheet), adds every property and policy, and uses the "Renew" sheet for newer terms.</p>
-      <p class="muted small">Safe to run again: nothing is added twice.</p>
-      <label class="btn file-btn">Choose Excel file<input type="file" id="imp-file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden></label>
-      <div id="imp-out"></div></div>`;
-  $('#imp-file').addEventListener('change', async (e) => {
-    const fd = new FormData(); fd.append('file', e.target.files[0]);
-    $('#imp-out').innerHTML = '<p class="muted">Importing…</p>';
-    try {
-      const r = await api('POST', '/api/insurance/import', fd);
-      $('#imp-out').innerHTML = `<p class="ok-note">✓ Done: ${r.properties_added} properties added, ${r.policies_added} policies added, ${r.renewals} renewals, ${r.policies_updated} updated.</p>
-        <p class="muted small">Sheets read: ${r.sheets.map((s) => `${esc(s.name)} (${s.rows} rows)`).join(', ') || 'none found'}</p>
-        <a class="btn" href="#/insurance">See insurance</a>`;
-    } catch (err) { $('#imp-out').innerHTML = `<p class="error">${esc(err.message)}</p>`; }
-  });
-}
-
-// "39,40,41,43" -> "39-41, 43"
-function pagesLabel(list) {
-  const out = []; let a = null; let b = null;
-  for (const n of list) { if (a === null) { a = b = n; } else if (n === b + 1) b = n; else { out.push(a === b ? `${a}` : `${a}-${b}`); a = b = n; } }
-  if (a !== null) out.push(a === b ? `${a}` : `${a}-${b}`);
-  return out.join(', ');
-}
-
-async function viewInsuranceSplit() {
-  setNav('insurance');
-  const props = (await api('GET', '/api/insurance')).properties.slice().sort((a, b) => a.address.localeCompare(b.address));
-  const opts = (sel = []) => `<option value="">+ Add a property…</option>${props.map((p) => `<option value="${p.id}" ${sel.includes(p.id) ? 'disabled' : ''}>${esc(p.address)}</option>`).join('')}`;
-  $app.innerHTML = `<a href="#/insurance" class="back">← All insurance</a>
-    <div class="card"><h1>Split a big PDF</h1>
-      <p>Upload one large policy PDF (up to 150 MB). The app finds which pages belong to which property, using the policy numbers and addresses on file, and saves each property's pages as its own PDF.</p>
-      <label class="btn file-btn">Choose PDF<input type="file" id="sp-file" accept="application/pdf,.pdf" hidden></label>
-      <div id="sp-out"></div></div>`;
-  $('#sp-file').addEventListener('change', async (e) => {
-    const out = $('#sp-out');
-    out.innerHTML = '<p class="muted">Reading every page… (large files can take a minute)</p>';
-    const fd = new FormData(); fd.append('file', e.target.files[0]);
-    let a;
-    try { a = await api('POST', '/api/insurance/split', fd); } catch (err) { out.innerHTML = `<p class="error">${esc(err.message)}</p>`; return; }
-    const groups = a.groups.map((g) => ({ pages: g.dec_pages.length ? pagesLabel(g.dec_pages) : `${g.from}-${g.to}`, all: `${g.from}-${g.to}`, dec: g.dec_pages, ids: g.property_ids.slice(), keys: g.keys || [] }));
-    const draw = () => {
-      out.innerHTML = `<p class="ok-note">✓ ${a.total} pages read${a.scanned ? ' (scanned: no text found, so pick the pages by hand)' : ''}.</p>
-        ${groups.map((g, i) => `<div class="split-group">
-          <div class="field"><label for="sg-pages-${i}">Pages</label><input id="sg-pages-${i}" value="${esc(g.pages)}" placeholder="e.g. 39-49"></div>
-          <div class="row">
-            ${g.dec.length ? `<button type="button" class="btn small ${g.pages === pagesLabel(g.dec) ? '' : 'ghost'}" data-dec="${i}">Declarations only (${g.dec.length} p.)</button>` : ''}
-            <button type="button" class="btn small ${g.pages === g.all ? '' : 'ghost'}" data-all="${i}">All pages ${esc(g.all)}</button>
-          </div>
-          <span class="label">Save to</span>
-          <div class="chips wrap">${g.ids.map((pid) => `<span class="chip on">${esc((props.find((p) => p.id === pid) || {}).address || '?')} <button type="button" class="x" data-rm="${i}:${pid}" aria-label="Remove">✕</button></span>`).join('') || '<span class="muted small">No property matched. Pick one below.</span>'}</div>
-          <select data-add="${i}">${opts(g.ids)}</select>
-        </div>`).join('')}
-        <button type="button" class="btn small ghost" id="sp-more">+ Another page range</button>
-        <p class="error" id="sp-err"></p>
-        <button type="button" class="btn block" id="sp-save">Save PDFs to properties</button>`;
-      groups.forEach((g, i) => $(`#sg-pages-${i}`).addEventListener('input', (ev) => { g.pages = ev.target.value; }));
-      $$('[data-dec]').forEach((b) => b.addEventListener('click', () => { const g = groups[b.dataset.dec]; g.pages = pagesLabel(g.dec); draw(); }));
-      $$('[data-all]').forEach((b) => b.addEventListener('click', () => { const g = groups[b.dataset.all]; g.pages = g.all; draw(); }));
-      $$('[data-rm]').forEach((b) => b.addEventListener('click', () => { const [i, pid] = b.dataset.rm.split(':').map(Number); groups[i].ids = groups[i].ids.filter((x) => x !== pid); draw(); }));
-      $$('[data-add]').forEach((s) => s.addEventListener('change', () => { if (s.value) { groups[s.dataset.add].ids.push(Number(s.value)); draw(); } }));
-      $('#sp-more').addEventListener('click', () => { groups.push({ pages: '', all: `1-${a.total}`, dec: [], ids: [] }); draw(); });
-      $('#sp-save').addEventListener('click', async () => {
-        const send = groups.filter((g) => g.ids.length && g.pages.trim()).map((g) => ({ pages: g.pages, property_ids: g.ids, keys: g.keys }));
-        if (!send.length) { $('#sp-err').textContent = 'Pick at least one property and page range.'; return; }
-        try {
-          const r = await api('POST', `/api/insurance/split/${a.split_id}/save`, { groups: send });
-          out.innerHTML = `<p class="ok-note">✓ Saved ${r.saved.length} PDF${r.saved.length === 1 ? '' : 's'}:</p><ul class="file-list">${r.saved.map((x) => `
-            <li><a href="#/insurance/${x.property_id}">${esc((props.find((p) => p.id === x.property_id) || {}).address || '')}</a> <span class="muted small">pages ${esc(x.pages)}</span></li>`).join('')}</ul>
-            <a class="btn" href="#/insurance">Back to insurance</a>`;
-        } catch (err) { $('#sp-err').textContent = err.message; }
-      });
-    };
-    draw();
-  });
-}
-
-// ---------- INVOICES (admins): upload, 3 questions, paid / unpaid, pay reminders ----------
-const officeTabs = (active) => `<div class="office-tabs" role="tablist">
-    <a href="#/insurance" role="tab" class="${active === 'insurance' ? 'on' : ''}">🛡 Insurance</a>
-    <a href="#/invoices" role="tab" class="${active === 'invoices' ? 'on' : ''}">🧾 Invoices</a>
-  </div>`;
-const invState = { tab: 'unpaid', q: '' };
-const money2 = (n) => (n === null || n === undefined ? '' : `$${Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-const isoLocal = (date, time) => { const d = date ? new Date(`${date}T${time || '10:00'}`) : null; return d && Number.isFinite(d.getTime()) ? d.toISOString() : null; };
-function defaultPayReminder(due) {
-  const d = new Date(Date.now() + 24 * 3600e3);
-  let date = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-  if (due) { // the day before it's due, if that's still ahead
-    const b = new Date(`${due}T10:00`); b.setDate(b.getDate() - 1);
-    if (b.getTime() > Date.now()) date = `${b.getFullYear()}-${pad2(b.getMonth() + 1)}-${pad2(b.getDate())}`;
-  }
-  return { date, time: '10:00' };
-}
-function payerOptions(team, selected = '') {
-  const names = [...new Set([...team.map((u) => u.name), 'Company account'])];
-  return `<option value="">Choose…</option>${names.map((n) => `<option ${n === selected ? 'selected' : ''}>${esc(n)}</option>`).join('')}
-    <option value="__other" ${selected && !names.includes(selected) ? 'selected' : ''}>Someone else…</option>`;
-}
-const payerValue = (sel, other) => (sel.value === '__other' ? other.value.trim() : sel.value);
-
-async function viewInvoices() {
-  const navAt = navToken;
-  setNav('insurance');
-  if (me.role !== 'admin') { $app.innerHTML = '<div class="empty">Invoices are for admins only.</div>'; return; }
-  const [d, props, team] = await Promise.all([api('GET', '/api/invoices'), api('GET', '/api/insurance'), agents()]);
-  if (navAt !== navToken || !onPage('#/invoices')) return;
-  const properties = props.properties.slice().sort((a, b) => a.address.localeCompare(b.address));
-  $app.innerHTML = `
-    ${officeTabs('invoices')}
-    <h1>Invoices</h1>
-    <div class="card upload-inv">
-      <label class="btn block file-btn big-upload">⬆️ Upload an invoice<input type="file" id="inv-file" accept="application/pdf,.pdf,image/*" hidden></label>
-      <p class="muted small" style="margin:8px 0 0">PDF or a photo. On a phone you can take a picture of a paper invoice.</p>
-      <div id="inv-new"></div>
-    </div>
-    <div class="inv-tabs chips" id="inv-tabs">
-      <button type="button" class="chip ${invState.tab === 'unpaid' ? 'on' : ''}" data-tab="unpaid">Unpaid (${d.counts.unpaid})</button>
-      <button type="button" class="chip ${invState.tab === 'paid' ? 'on' : ''}" data-tab="paid">Paid (${d.counts.paid})</button>
-      <button type="button" class="chip ${invState.tab === 'all' ? 'on' : ''}" data-tab="all">All</button>
-    </div>
-    ${d.counts.unpaid ? `<p class="inv-total">Unpaid total: <b>${esc(money2(d.counts.unpaid_total))}</b></p>` : ''}
-    <div class="searchbar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-      <input id="inv-q" type="search" placeholder="Property, company or invoice #" value="${esc(invState.q)}" aria-label="Search invoices"></div>
-    <ul class="inv-list" id="inv-list"></ul>`;
-  const draw = () => {
-    const q = invState.q.trim().toLowerCase();
-    const today = new Date().toISOString().slice(0, 10);
-    const list = d.invoices.filter((i) => (invState.tab === 'all' || i.status === invState.tab)
-      && (!q || `${i.property || ''} ${i.vendor || ''} ${i.invoice_number || ''} ${i.paid_by || ''}`.toLowerCase().includes(q)));
-    $('#inv-list').innerHTML = list.length ? list.map((i) => {
-      const late = i.status === 'unpaid' && i.due_date && i.due_date < today;
-      return `<li class="inv-item ${i.status} ${late ? 'late' : ''}"><a href="#/invoices/${i.id}">
-        <span class="inv-badge">${i.status === 'paid' ? '✓ Paid' : late ? 'Overdue' : 'Unpaid'}</span>
-        <span class="inv-prop">${esc(i.property || 'No property')}</span>
-        <span class="inv-amt">${esc(money2(i.amount) || 'Amount not entered')}${i.vendor ? ` · ${esc(i.vendor)}` : ''}</span>
-        <span class="inv-meta">${i.status === 'paid' ? `Paid by ${esc(i.paid_by || '?')}${i.paid_on ? ` on ${esc(usDate(i.paid_on))}` : ''}`
-          : `${i.due_date ? `Due ${esc(usDate(i.due_date))}` : 'No due date'}${i.remind_at && !i.remind_sent ? ` · ⏰ ${esc(fmtWhen(i.remind_at))}` : ''}`}</span>
-      </a></li>`;
-    }).join('') : `<li class="empty">${invState.tab === 'unpaid' ? 'No unpaid invoices. 🎉' : 'Nothing here yet.'}</li>`;
-  };
-  draw();
-  $$('#inv-tabs .chip').forEach((b) => b.addEventListener('click', () => {
-    invState.tab = b.dataset.tab; $$('#inv-tabs .chip').forEach((c) => c.classList.toggle('on', c === b)); draw();
-  }));
-  $('#inv-q').addEventListener('input', (e) => { invState.q = e.target.value; draw(); });
-
-  // Upload -> read -> 3 questions
-  $('#inv-file').addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const box = $('#inv-new');
-    box.innerHTML = '<p class="muted">Reading the invoice…</p>';
-    const fd = new FormData(); fd.append('file', file);
-    let r;
-    try { r = await api('POST', '/api/invoices/read', fd); } catch (err) { box.innerHTML = `<p class="error">${esc(err.message)}</p>`; return; }
-    const g = r.guess || {};
-    const rem = defaultPayReminder(g.due_date);
-    box.innerHTML = `<form id="inv-form" class="inv-form">
-      <p class="ok-note">✓ ${esc(file.name)}</p>
-      <div class="field q-lead"><label for="inv-prop">1. Which property is this invoice for?</label>
-        <select id="inv-prop" required><option value="">Choose a property…</option>
-          ${properties.map((p) => `<option value="${p.id}" ${r.property_id === p.id ? 'selected' : ''}>${esc(p.address)}</option>`).join('')}
-          <option value="__new">+ A property not in the list…</option></select>
-        <input id="inv-newprop" placeholder="Type the address" maxlength="300" hidden style="margin-top:8px">
-        ${r.property_id ? '<span class="help">Suggested from the invoice. Change it if it is wrong.</span>' : ''}</div>
-      <div class="field"><span class="label">2. Is it paid?</span>
-        <div class="yn"><button type="button" class="btn ghost" data-paid="yes">✓ Yes, paid</button><button type="button" class="btn ghost" data-paid="no">✕ Not paid</button></div></div>
-      <div class="field" id="q-who" hidden><label for="inv-who">3. Who paid?</label>
-        <select id="inv-who">${payerOptions(team)}</select>
-        <input id="inv-who-other" placeholder="Name" maxlength="200" hidden style="margin-top:8px">
-        <label for="inv-paid-on" style="margin-top:12px">Date paid</label><input id="inv-paid-on" type="date" value="${new Date().toISOString().slice(0, 10)}"></div>
-      <div class="field reminder-box" id="q-remind" hidden>
-        <p class="rb-q">⏰ Set a reminder to pay it?</p>
-        <div class="yn"><button type="button" class="btn ghost" data-rem="yes">Yes, remind me</button><button type="button" class="btn ghost" data-rem="no">No thanks</button></div>
-        <div id="rem-when" hidden class="grid2" style="margin-top:12px">
-          <div class="field"><label for="inv-rdate">Date</label><input id="inv-rdate" type="date" value="${rem.date}"></div>
-          <div class="field"><label for="inv-rtime">Time</label><input id="inv-rtime" type="time" value="${rem.time}"></div>
-        </div></div>
-      <details class="inv-extra" ${g.amount || g.due_date ? 'open' : ''}><summary>Details from the invoice (optional)</summary>
-        <div class="grid2">
-          <div class="field"><label for="inv-amount">Amount</label><input id="inv-amount" inputmode="decimal" value="${esc(g.amount ?? '')}"></div>
-          <div class="field"><label for="inv-due">Due date</label><input id="inv-due" type="date" value="${esc(g.due_date || '')}"></div>
-        </div>
-        <div class="grid2">
-          <div class="field"><label for="inv-vendor">From (company)</label><input id="inv-vendor" maxlength="200" value="${esc(g.vendor || '')}"></div>
-          <div class="field"><label for="inv-num">Invoice #</label><input id="inv-num" maxlength="60" value="${esc(g.invoice_number || '')}"></div>
-        </div></details>
-      <p class="error" id="inv-err"></p>
-      <button class="btn block" type="submit">Save invoice</button>
-    </form>`;
-    let paid = ''; let remind = false;
-    const propSel = $('#inv-prop');
-    propSel.addEventListener('change', () => { $('#inv-newprop').hidden = propSel.value !== '__new'; if (propSel.value === '__new') $('#inv-newprop').focus(); });
-    $('#inv-who').addEventListener('change', () => { $('#inv-who-other').hidden = $('#inv-who').value !== '__other'; });
-    $$('[data-paid]').forEach((b) => b.addEventListener('click', () => {
-      paid = b.dataset.paid;
-      $$('[data-paid]').forEach((x) => { x.classList.toggle('ghost', x !== b); });
-      $('#q-who').hidden = paid !== 'yes';
-      $('#q-remind').hidden = paid !== 'no';
-      if (paid === 'yes') $('#inv-who').focus();
-    }));
-    $$('[data-rem]').forEach((b) => b.addEventListener('click', () => {
-      remind = b.dataset.rem === 'yes';
-      $$('[data-rem]').forEach((x) => { x.classList.toggle('ghost', x !== b); });
-      $('#rem-when').hidden = !remind;
-    }));
-    $('#inv-form').addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      const err = $('#inv-err');
-      const body = {
-        upload_id: r.upload_id,
-        property_id: propSel.value && propSel.value !== '__new' ? Number(propSel.value) : null,
-        new_property: propSel.value === '__new' ? $('#inv-newprop').value : '',
-        paid, paid_by: paid === 'yes' ? payerValue($('#inv-who'), $('#inv-who-other')) : '', paid_on: $('#inv-paid-on').value,
-        remind_at: paid === 'no' && remind ? isoLocal($('#inv-rdate').value, $('#inv-rtime').value) : null,
-        amount: $('#inv-amount').value, due_date: $('#inv-due').value, vendor: $('#inv-vendor').value, invoice_number: $('#inv-num').value,
-      };
-      if (!body.property_id && !body.new_property.trim()) { err.textContent = 'Choose which property this invoice is for.'; propSel.focus(); return; }
-      if (!paid) { err.textContent = 'Is it paid? Tap Yes or Not paid.'; return; }
-      if (paid === 'yes' && !body.paid_by) { err.textContent = 'Who paid it?'; $('#inv-who').focus(); return; }
-      try {
-        const saved = await api('POST', '/api/invoices', body);
-        toast('Invoice saved');
-        invState.tab = saved.status;
-        go(`#/invoices/${saved.id}${saved.remind_at ? '?cal=1' : ''}`);
-      } catch (e2) { err.textContent = e2.message; }
-    });
-  });
-}
-
-async function viewInvoice(id, showCal) {
-  const navAt = navToken;
-  setNav('insurance');
-  const [i, props, team] = await Promise.all([api('GET', `/api/invoices/${id}`), api('GET', '/api/insurance'), agents()]);
-  if (navAt !== navToken || !location.hash.startsWith(`#/invoices/${id}`)) return;
-  const properties = props.properties.slice().sort((a, b) => a.address.localeCompare(b.address));
-  const isPdf = i.mime === 'application/pdf';
-  const calUrl = `/api/invoices/${i.id}/calendar.ics?k=${encodeURIComponent(i.cal_key || '')}`;
-  $app.innerHTML = `
-    ${officeTabs('invoices')}
-    <a href="#/invoices" class="back">← All invoices</a>
-    <div class="card inv-head ${i.status}">
-      <span class="inv-badge">${i.status === 'paid' ? '✓ Paid' : 'Unpaid'}</span>
-      <h1>${esc(i.property || 'No property')}</h1>
-      <p class="inv-big">${esc(money2(i.amount) || 'Amount not entered')}</p>
-      <p class="muted">${esc([i.vendor, i.invoice_number ? `Invoice # ${i.invoice_number}` : '', i.due_date ? `Due ${usDate(i.due_date)}` : ''].filter(Boolean).join(' · '))}</p>
-      ${i.status === 'paid' ? `<p class="ok-note">Paid by ${esc(i.paid_by)}${i.paid_on ? ` on ${esc(usDate(i.paid_on))}` : ''}</p>` : ''}
-      <a class="btn block" href="/api/invoices/${i.id}/file" target="_blank" rel="noopener">${isPdf ? '📄 Open invoice PDF' : '🖼 Open invoice photo'}</a>
-    </div>
-
-    ${i.status === 'unpaid' ? `
-    <div class="card">
-      <h2>Mark as paid</h2>
-      <form id="pay-form">
-        <div class="field"><label for="pay-who">Who paid?</label><select id="pay-who">${payerOptions(team)}</select>
-          <input id="pay-who-other" placeholder="Name" maxlength="200" hidden style="margin-top:8px"></div>
-        <div class="field"><label for="pay-on">Date paid</label><input id="pay-on" type="date" value="${new Date().toISOString().slice(0, 10)}"></div>
-        <p class="error" id="pay-err"></p>
-        <button class="btn block" type="submit">✓ Mark as paid</button>
-      </form>
-    </div>
-    <div class="card reminder-box">
-      <p class="rb-q">⏰ Pay reminder</p>
-      ${i.remind_at ? `<p>${i.remind_sent ? 'Sent' : 'Set for'} <b>${esc(fmtWhen(i.remind_at))}</b>${i.remind_user_name ? ` (${esc(i.remind_user_name)})` : ''}</p>
-        ${!i.remind_sent ? `<a class="btn block ${showCal ? '' : 'ghost'}" href="${calUrl}">📅 Add to my phone's calendar</a>` : ''}` : '<p class="muted">No reminder set.</p>'}
-      <form id="rem-form" class="grid2" style="margin-top:12px">
-        <div class="field"><label for="r-date">Date</label><input id="r-date" type="date" value="${defaultPayReminder(i.due_date).date}"></div>
-        <div class="field"><label for="r-time">Time</label><input id="r-time" type="time" value="10:00"></div>
-        <button class="btn small" type="submit">${i.remind_at ? 'Change reminder' : 'Set reminder'}</button>
-        ${i.remind_at ? '<button class="btn small ghost" type="button" id="rem-clear">Remove reminder</button>' : ''}
-      </form>
-    </div>` : `
-    <div class="card"><button type="button" class="btn ghost" id="mark-unpaid">Mark as NOT paid</button></div>`}
-
-    <div class="card">
-      <h2>Details</h2>
-      <form id="det-form">
-        <div class="field"><label for="d-prop">Property</label><select id="d-prop">${properties.map((p) => `<option value="${p.id}" ${p.id === i.property_id ? 'selected' : ''}>${esc(p.address)}</option>`).join('')}</select></div>
-        <div class="grid2">
-          <div class="field"><label for="d-amount">Amount</label><input id="d-amount" inputmode="decimal" value="${esc(i.amount ?? '')}"></div>
-          <div class="field"><label for="d-due">Due date</label><input id="d-due" type="date" value="${esc(i.due_date || '')}"></div>
-        </div>
-        <div class="grid2">
-          <div class="field"><label for="d-vendor">From (company)</label><input id="d-vendor" value="${esc(i.vendor || '')}" maxlength="200"></div>
-          <div class="field"><label for="d-num">Invoice #</label><input id="d-num" value="${esc(i.invoice_number || '')}" maxlength="60"></div>
-        </div>
-        <div class="field"><label for="d-notes">Notes</label><textarea id="d-notes" maxlength="2000">${esc(i.notes || '')}</textarea></div>
-        <button class="btn small" type="submit">Save details</button>
-      </form>
-    </div>
-
-    <div class="card">
-      <h2>History</h2>
-      <ul class="timeline">${i.history.map((h) => `<li><b>${esc(h.user_name || 'System')}</b> · ${esc(fmtDate(h.created_at))}<br><span class="small">${esc(h.action.replace(/_/g, ' '))}${h.detail ? `: ${esc(h.detail)}` : ''}</span></li>`).join('')}</ul>
-      <p class="muted small">Uploaded by ${esc(i.uploaded_by_name || '?')} · ${esc(i.original_name)}</p>
-      <button type="button" class="btn small danger" id="inv-del">Delete invoice</button>
-    </div>`;
-
-  const reload = () => viewInvoice(id, false);
-  const pf = $('#pay-form');
-  if (pf) {
-    $('#pay-who').addEventListener('change', () => { $('#pay-who-other').hidden = $('#pay-who').value !== '__other'; });
-    pf.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const who = payerValue($('#pay-who'), $('#pay-who-other'));
-      if (!who) { $('#pay-err').textContent = 'Who paid it?'; return; }
-      try { await api('PATCH', `/api/invoices/${id}`, { paid: 'yes', paid_by: who, paid_on: $('#pay-on').value }); toast('Marked as paid'); reload(); }
-      catch (err) { $('#pay-err').textContent = err.message; }
-    });
-    $('#rem-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      try { await api('PATCH', `/api/invoices/${id}`, { remind_at: isoLocal($('#r-date').value, $('#r-time').value) }); toast('Reminder set'); viewInvoice(id, true); }
-      catch (err) { toast(err.message, true); }
-    });
-    const rc = $('#rem-clear');
-    if (rc) rc.addEventListener('click', async () => { await api('PATCH', `/api/invoices/${id}`, { remind_at: null }); toast('Reminder removed'); reload(); });
-  }
-  const mu = $('#mark-unpaid');
-  if (mu) mu.addEventListener('click', async () => { await api('PATCH', `/api/invoices/${id}`, { paid: 'no' }); toast('Marked as not paid'); reload(); });
-  $('#det-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    try {
-      await api('PATCH', `/api/invoices/${id}`, { property_id: Number($('#d-prop').value), amount: $('#d-amount').value, due_date: $('#d-due').value,
-        vendor: $('#d-vendor').value, invoice_number: $('#d-num').value, notes: $('#d-notes').value });
-      toast('Saved'); reload();
-    } catch (err) { toast(err.message, true); }
-  });
-  $('#inv-del').addEventListener('click', async () => {
-    if (!confirm('Delete this invoice and its file?')) return;
-    try { await api('DELETE', `/api/invoices/${id}`); toast('Deleted'); go('#/invoices'); } catch (err) { toast(err.message, true); }
-  });
-}
-
 // ---------- text size (remembered on this device) ----------
 function textSize() { try { return localStorage.getItem('jrp-text-size') || ''; } catch { return ''; } }
 function setTextSize(v) {
@@ -2410,5 +1302,8 @@ function setTextSize(v) {
 setTextSize(textSize());
 
 // ---------- start ----------
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-route().then(pushSync);
+// This is a plain website now: remove the offline helper an earlier version installed.
+if ('serviceWorker' in navigator && navigator.serviceWorker.getRegistrations) {
+  navigator.serviceWorker.getRegistrations().then((regs) => regs.forEach((r) => r.unregister())).catch(() => {});
+}
+route();
